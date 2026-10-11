@@ -25,9 +25,9 @@ impl SkinDescriptor {
         let joint_index = vertex.joints[i] as usize;
         let joint_id = slab.read(self.joints_array.at(joint_index));
         let joint_transform = slab.read(joint_id);
-        // First apply the inverse bind matrix to bring the vertex into the joint's
-        // local space, then apply the joint's current transformation to move it
-        // into world space.
+        // First apply the inverse bind matrix to bring the vertex into the
+        // joint's local space, then apply the joint's current
+        // transformation to move it into world space.
         let inverse_bind_matrix = slab.read(self.inverse_bind_matrices_array.at(joint_index));
         Mat4::from(joint_transform) * inverse_bind_matrix
     }

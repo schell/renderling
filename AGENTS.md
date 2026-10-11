@@ -17,7 +17,7 @@
 
 Always format with `cargo +nightly fmt`.
 
-The fmt toolchain is pinned to `nightly-2026-07-31` via `RUST_NIGHTLY_TOOLCHAIN` in `.github/workflows/push.yaml`. Use that toolchain locally too; bump it deliberately (reformat + regenerate shaders in the same PR).
+The fmt toolchain is pinned to `nightly-2026-10-10` via `RUST_NIGHTLY_TOOLCHAIN` in `.github/workflows/push.yaml`. Use that toolchain locally too; bump it deliberately (reformat + regenerate shaders in the same PR).
 
 ## Disallowed Methods (clippy.toml)
 Avoid: `Vec{2,3,4}::normalize_or_zero`, `Mat4::to_scale_rotation_translation`, `f32::signum`

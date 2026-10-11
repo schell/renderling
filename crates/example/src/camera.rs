@@ -146,8 +146,8 @@ impl CameraController for WasdMouseCameraController {
         if let Some(prev) = self.last_tick.replace(now) {
             let dt = now - prev;
 
-            // We want the direction to be based solely on self.theta, because we
-            // don't want the camera to move in Y.
+            // We want the direction to be based solely on self.theta, because
+            // we don't want the camera to move in Y.
             let forward_direction = Vec3::NEG_Z;
             let left_direction = Vec3::NEG_X;
             let up_direction = Vec3::Y;
@@ -194,7 +194,8 @@ impl CameraController for WasdMouseCameraController {
     }
 
     fn reset(&mut self, _bounds: Aabb) {
-        self.position = Vec3::ZERO; //center_max_z + (center_max_z - center_min_z) * 0.5;
+        self.position = Vec3::ZERO; //center_max_z + (center_max_z -
+                                    // center_min_z) * 0.5;
         self.theta = 0.0;
         self.phi = 0.0;
         self.speed = 2.0;

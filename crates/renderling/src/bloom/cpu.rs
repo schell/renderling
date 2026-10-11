@@ -561,10 +561,11 @@ impl Bloom {
         }
         // Get all the bindgroups (which are what we're reading from),
         // starting with the hdr frame.
-        // Since `bindgroups` are one element greater (we pushed `hdr_texture_bindgroup`
-        // to the front) the last bindgroup will not be used, which is good - we
-        // don't need to read from the smallest texture during downsampling.
-        // UNWRAP: not safe but we want to panic
+        // Since `bindgroups` are one element greater (we pushed
+        // `hdr_texture_bindgroup` to the front) the last bindgroup will
+        // not be used, which is good - we don't need to read from the
+        // smallest texture during downsampling. UNWRAP: not safe but we
+        // want to panic
         let textures_guard = self.textures.read().expect("bloom textures read");
         let hdr_texture_downsample_bindgroup_guard = self
             .hdr_texture_downsample_bindgroup

@@ -819,8 +819,8 @@ pub async fn read_depth_texture_to_image(
         .iter()
         .copied()
         .map(|f| {
-            // Depth texture is stored as Depth32Float, but the values are normalized
-            // 0.0-1.0
+            // Depth texture is stored as Depth32Float, but the values are
+            // normalized 0.0-1.0
             (255.0 * f) as u8
         })
         .collect::<Vec<u8>>();
@@ -949,8 +949,8 @@ impl std::future::Future for MappedBuffer<'_> {
             std::task::Poll::Ready(result.map(|()| {
                 let padded_buffer = this.buffer_slice.get_mapped_range();
                 let mut unpadded_buffer = vec![];
-                // from the padded_buffer we write just the unpadded bytes into the
-                // unpadded_buffer
+                // from the padded_buffer we write just the unpadded bytes into
+                // the unpadded_buffer
                 for chunk in padded_buffer.chunks(self.dimensions.padded_bytes_per_row) {
                     unpadded_buffer
                         .extend_from_slice(&chunk[..self.dimensions.unpadded_bytes_per_row]);

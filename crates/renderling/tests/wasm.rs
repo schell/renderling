@@ -231,7 +231,8 @@ async fn implicit_isosceles_triangle() {
                 cache: None,
             })
     }
-    // The first time through render with handwritten WGSL to ensure the setup works
+    // The first time through render with handwritten WGSL to ensure the setup
+    // works
     let hand_written_wgsl_pipeline = {
         let vertex = runtime.device.create_shader_module(wgpu::include_wgsl!(
             "../src/tutorial/implicit_isosceles_vertex.wgsl"
@@ -241,8 +242,8 @@ async fn implicit_isosceles_triangle() {
             .create_shader_module(wgpu::include_wgsl!("../src/tutorial/passthru.wgsl"));
         create_pipeline(runtime, &vertex, "main", &fragment, "main")
     };
-    // The second time render with WGSL that is transpiled from Rust code and pulled
-    // in through the renderling linkage machinery.
+    // The second time render with WGSL that is transpiled from Rust code and
+    // pulled in through the renderling linkage machinery.
     let linkage_pipeline = {
         let vertex = renderling::linkage::implicit_isosceles_vertex::linkage(&runtime.device);
         let fragment = renderling::linkage::passthru_fragment::linkage(&runtime.device);

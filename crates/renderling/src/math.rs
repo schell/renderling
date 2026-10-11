@@ -33,8 +33,8 @@ impl Fetch<UVec2> for Image!(2D, type=f32, sampled, depth, multisampled=true) {
 
     fn fetch(&self, coords: UVec2) -> Self::Output {
         // TODO: check whether this is doing what we think it's doing.
-        // (We think its doing roughly the same thing as the non-multisampled version
-        // above)
+        // (We think its doing roughly the same thing as the non-multisampled
+        // version above)
         self.fetch_with(coords, sample_with::sample_index(0))
     }
 }

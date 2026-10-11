@@ -930,8 +930,8 @@ mod test {
             renderlet
         };
 
-        // Do two renders, because depth pyramid operates on depth data one frame
-        // behind
+        // Do two renders, because depth pyramid operates on depth data one
+        // frame behind
         save_render("3_purple_cube");
         save_render("3_purple_cube");
 
@@ -962,7 +962,8 @@ mod test {
             img_diff::save(format!("cull/debugging_pyramid_mip_{i}.png"), img);
         }
 
-        // The stage's slab, which contains the `Renderlet`s and their `BoundingSphere`s
+        // The stage's slab, which contains the `Renderlet`s and their
+        // `BoundingSphere`s
         let stage_slab = futures_lite::future::block_on({
             let geometry: &Geometry = stage.as_ref();
             geometry.slab_allocator().read(..)
@@ -970,8 +971,8 @@ mod test {
         .unwrap();
         let draw_calls = stage.draw_calls.read().unwrap();
         let indirect_draws = draw_calls.drawing_strategy.as_indirect().unwrap();
-        // The HZB slab, which contains a `DepthPyramidDescriptor` at index 0, and all
-        // the pyramid's mips
+        // The HZB slab, which contains a `DepthPyramidDescriptor` at index 0,
+        // and all the pyramid's mips
         let depth_pyramid_slab = futures_lite::future::block_on(
             indirect_draws
                 .compute_culling

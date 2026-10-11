@@ -324,8 +324,9 @@ impl ShadowMap {
             let mut encoder = device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Self::LABEL });
 
-            // Update the lighting descriptor to point to this shadow map, which tells the
-            // vertex shader which shadow map we're updating.
+            // Update the lighting descriptor to point to this shadow map, which
+            // tells the vertex shader which shadow map we're
+            // updating.
             lighting.lighting_descriptor.modify(|ld| {
                 let id = self.shadowmap_descriptor.id();
                 log::trace!("updating the shadow map {id:?} {i}");
@@ -372,7 +373,8 @@ impl ShadowMap {
                 }
                 log::trace!("rendered {count} renderlets to the shadow map");
             }
-            // Then copy the depth texture to our shadow map atlas in the lighting struct
+            // Then copy the depth texture to our shadow map atlas in the
+            // lighting struct
             self.blitting_op.run(
                 lighting.light_slab.runtime(),
                 &mut encoder,
@@ -408,8 +410,8 @@ mod test {
             .with_msaa_sample_count(4);
 
         // let hdr_path =
-        //     std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR")).join("img/hdr/
-        // night.hdr"); let hdr_img =
+        //     std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR")).join("
+        // img/hdr/ night.hdr"); let hdr_img =
         // AtlasImage::from_hdr_path(hdr_path).unwrap();
 
         // let skybox = Skybox::new(&ctx, hdr_img, camera.id());
@@ -552,14 +554,16 @@ mod test {
         //     use crate::texture::DepthTexture;
         //     use image::Luma;
         //     {
-        //         // Ensure the state of the "update texture", which receives the depth
-        // of the scene on update         let shadow_map_update_texture =
-        //             DepthTexture::try_new_from(&ctx,
-        // shadows.update_texture.clone()).unwrap();         let mut
-        // shadow_map_update_img = shadow_map_update_texture.read_image().unwrap();
+        //         // Ensure the state of the "update texture", which receives
+        // the depth of the scene on update         let
+        // shadow_map_update_texture =
+        // DepthTexture::try_new_from(&ctx, shadows.update_texture.
+        // clone()).unwrap();         let mut shadow_map_update_img =
+        // shadow_map_update_texture.read_image().unwrap();
         //         img_diff::normalize_gray_img(&mut shadow_map_update_img);
         //         img_diff::save(
-        //             "shadows/shadow_mapping_sanity/shadows_update_texture.png",
+        //
+        // "shadows/shadow_mapping_sanity/shadows_update_texture.png",
         //             shadow_map_update_img,
         //         );
         //     }
@@ -573,8 +577,8 @@ mod test {
         //         let shadow_depth_img = shadow_depth_img.into_luma8();
         //         let mut depth_img = shadow_depth_img.clone();
         //         img_diff::normalize_gray_img(&mut depth_img);
-        //         img_diff::save("shadows/shadow_mapping_sanity/depth.png", depth_img);
-        //     }
+        //         img_diff::save("shadows/shadow_mapping_sanity/depth.png",
+        // depth_img);     }
         // }
 
         // Now do the rendering *with the shadow map* to see if it works.
@@ -633,8 +637,8 @@ mod test {
                 stage.render(&frame.view());
                 let _img = frame.read_image().block().unwrap();
                 // img_diff::assert_img_eq(
-                //     &format!("shadows/shadow_mapping_spots/light_pov_{i}.png"),
-                //     img,
+                //     &format!("shadows/shadow_mapping_spots/light_pov_{i}.png"
+                // ),     img,
                 // );
                 frame.present();
             }
@@ -700,8 +704,8 @@ mod test {
                     stage.render(&frame.view());
                     let _img = frame.read_image().block().unwrap();
                     // img_diff::assert_img_eq(
-                    //     &format!("shadows/shadow_mapping_points/light_{i}_pov_{j}.png"),
-                    //     img,
+                    //     &format!("shadows/shadow_mapping_points/
+                    // light_{i}_pov_{j}.png"),     img,
                     // );
                     frame.present();
                 }

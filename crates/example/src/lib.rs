@@ -374,13 +374,14 @@ impl App {
         //     if let Some(dir) = light.details.as_directional() {
         //         log::info!("found a directional light to use for shadows");
         //         {
-        //             let (p, j) = dir.get().shadow_mapping_projection_and_view(
-        //                 &light.node_transform.get_global_transform().into(),
+        //             let (p, j) =
+        // dir.get().shadow_mapping_projection_and_view(
+        // &light.node_transform.get_global_transform().into(),
         //                 &self.camera.get(),
         //             );
-        //             let mut guard = self.lighting.shadow_map.descriptor_lock();
-        //             guard.light_space_transform = p * j;
-        //         }
+        //             let mut guard =
+        // self.lighting.shadow_map.descriptor_lock();
+        // guard.light_space_transform = p * j;         }
 
         //         self.lighting
         //             .shadow_map

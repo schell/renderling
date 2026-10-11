@@ -111,9 +111,10 @@ mod test {
     #[cfg(feature = "gltf")]
     #[test]
     fn position_direction_sanity() {
-        // With GLTF, the direction of a light is given by the light's node's transform.
-        // Specifically we get the node's transform and use the rotation quaternion to
-        // rotate the vector Vec3::NEG_Z - the result is our direction.
+        // With GLTF, the direction of a light is given by the light's node's
+        // transform. Specifically we get the node's transform and use
+        // the rotation quaternion to rotate the vector Vec3::NEG_Z -
+        // the result is our direction.
 
         use glam::{Mat4, Quat};
         println!("{:#?}", std::env::current_dir());
@@ -131,10 +132,10 @@ mod test {
             println!("position: {position}");
             println!("direction: {direction}");
 
-            // In Blender, our lights are sitting at (0, 0, 1) pointing at -Z, +Z, +X and
-            // +Y. But alas, it is a bit more complicated than that because this
-            // file is exported with UP being +Y, so Z and Y have been
-            // flipped...
+            // In Blender, our lights are sitting at (0, 0, 1) pointing at -Z,
+            // +Z, +X and +Y. But alas, it is a bit more complicated
+            // than that because this file is exported with UP being
+            // +Y, so Z and Y have been flipped...
             assert_eq!(Vec3::Y, position);
             let expected_direction = match node.name() {
                 Some("light_negative_z") => Vec3::NEG_Y,
@@ -204,8 +205,8 @@ mod test {
     fn next_light_sanity() {
         {
             let lights_array = Array::new(0, 1);
-            // When there's only one light we only need one invocation to check that one
-            // light (per tile)
+            // When there's only one light we only need one invocation to check
+            // that one light (per tile)
             let mut next_light = NextLightIndex::new(UVec3::new(0, 0, 0), 16, lights_array);
             assert_eq!(Some(0u32.into()), next_light.next());
             assert_eq!(None, next_light.next());
@@ -231,7 +232,8 @@ mod test {
             assert_eq!(None, next_light.next());
         }
         {
-            // With 256 lights (16*16), each fragment in the tile checks exactly one light
+            // With 256 lights (16*16), each fragment in the tile checks exactly
+            // one light
             let lights_array = Array::new(0, 16 * 16);
             let mut checked_lights = vec![];
             for y in 0..16 {

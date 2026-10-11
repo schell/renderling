@@ -208,8 +208,8 @@ impl TestAppHandler for CullingExample {
             let target = Vec3::ZERO;
             let up = Vec3::Y;
             let view = Mat4::look_at_rh(eye, target, up);
-            // let projection = Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, -10.0,
-            // 10.0); let view = Mat4::IDENTITY;
+            // let projection = Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0,
+            // -10.0, 10.0); let view = Mat4::IDENTITY;
             CameraDescriptor::new(projection, view)
         });
 

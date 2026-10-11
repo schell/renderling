@@ -81,7 +81,8 @@ impl Materials {
     /// Returns `true` if the atlas texture was recreated.
     #[must_use]
     pub fn commit(&self) -> (bool, SlabBuffer<wgpu::Buffer>) {
-        // Atlas upkeep must be called first because it generates updates into the slab
+        // Atlas upkeep must be called first because it generates updates into
+        // the slab
         (self.atlas.upkeep(self.runtime()), self.slab.commit())
     }
 

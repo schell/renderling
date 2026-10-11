@@ -63,9 +63,10 @@ pub mod shader {
 
             let distance = sdf_circle.distance(frag_coord.xy() + 0.5);
 
-            // Here we use `step_le`, which I have annotated with `#inline(always)`.
-            // I did this because without it, it seems to do the opposite of expected.
-            // I found this by inlining by hand.
+            // Here we use `step_le`, which I have annotated with
+            // `#inline(always)`. I did this because without it, it
+            // seems to do the opposite of expected. I found this by
+            // inlining by hand.
             let alpha = crate::math::step_le(sphere_aabb.max.z, 1.0);
             if distance.abs() < 0.5 {
                 *frag_color = Vec4::new(0.0, 0.0, 0.0, 1.0 * alpha);
