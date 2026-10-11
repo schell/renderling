@@ -445,8 +445,8 @@ mod test {
     }
 
     #[test]
-    // This tests our ability to draw a CMYK triangle in the top left corner, using
-    // CW geometry.
+    // This tests our ability to draw a CMYK triangle in the top left corner,
+    // using CW geometry.
     fn cmy_triangle_backface() {
         use img_diff::DiffCfg;
 
@@ -694,8 +694,8 @@ mod test {
         img_diff::assert_img_eq("cmy_cube/remesh_before.png", img);
         frame.present();
 
-        // Update the cube mesh to a pyramid by overwriting the `.vertices` field
-        // of `Renderlet`
+        // Update the cube mesh to a pyramid by overwriting the `.vertices`
+        // field of `Renderlet`
         let pyramid_points = pyramid_points();
         let pyramid_geometry = stage
             .new_vertices(pyramid_indices().map(|i| cmy_gpu_vertex(pyramid_points[i as usize])));
@@ -755,8 +755,8 @@ mod test {
     }
 
     #[test]
-    // Tests that updating the material actually updates the rendering of an unlit
-    // mesh
+    // Tests that updating the material actually updates the rendering of an
+    // unlit mesh
     fn unlit_textured_cube_material() {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
@@ -925,8 +925,8 @@ mod test {
     }
 
     #[test]
-    // Test to make sure that we can reconstruct a normal matrix without using the
-    // inverse transpose of a model matrix, so long as we have the T R S
+    // Test to make sure that we can reconstruct a normal matrix without using
+    // the inverse transpose of a model matrix, so long as we have the T R S
     // transformation components (we really only need the scale).
     //
     // see Eric's comment here https://computergraphics.stackexchange.com/questions/1502/why-is-the-transposed-inverse-of-the-model-view-matrix-used-to-transform-the-nor?newreg=ffeabc7602da4fa2bc15fb9c84179dff

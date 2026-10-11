@@ -302,8 +302,8 @@ impl Tween {
                 .context(MissingPropertyIndexSnafu {
                     index: prev_keyframe_ndx,
                 })?;
-        // UNWRAP: safe because we know this is either the first index or was found
-        // above
+        // UNWRAP: safe because we know this is either the first index or was
+        // found above
         let [to_in, to, _] =
             self.properties
                 .get_cubic(next_keyframe_ndx)
@@ -423,8 +423,8 @@ impl Tween {
         // UNWRAP: safe because we know this was found above
         let from = self.properties.get(prev_keyframe_ndx).unwrap();
 
-        // UNWRAP: safe because we know this is either the first index or was found
-        // above
+        // UNWRAP: safe because we know this is either the first index or was
+        // found above
         let to = self.properties.get(next_keyframe_ndx).unwrap();
 
         let amount = (time - prev_time) / (next_time - prev_time);
@@ -726,8 +726,8 @@ impl Animator {
         log::trace!("  {} properties", properties.len());
         for (node_index, property) in properties.into_iter() {
             log::trace!("    {node_index} {}", property.description());
-            // There's plenty of reasons why a node referenced by an animation might not
-            // exist in the animator's "nodes":
+            // There's plenty of reasons why a node referenced by an animation
+            // might not exist in the animator's "nodes":
             // * the node is not in this scene
             // * business logic has removed it
             // * ...and the beat goes on

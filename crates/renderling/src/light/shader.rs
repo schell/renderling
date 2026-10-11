@@ -727,10 +727,11 @@ impl ShadowCalculation {
         if !crate::math::is_inside_clip_space(frag_pos_in_light_space.xyz()) {
             return 0.0;
         }
-        // The range of coordinates in the light's clip space is -1.0 to 1.0 for x and
-        // y, but the texture space is [0, 1], and Y increases downward, so we
-        // do this conversion to flip Y and also normalize to the range [0.0,
-        // 1.0]. Z should already be 0.0 to 1.0.
+        // The range of coordinates in the light's clip space is -1.0 to 1.0 for
+        // x and y, but the texture space is [0, 1], and Y increases
+        // downward, so we do this conversion to flip Y and also
+        // normalize to the range [0.0, 1.0]. Z should already be 0.0 to
+        // 1.0.
         let proj_coords_uv = (frag_pos_in_light_space.xy() * Vec2::new(1.0, -1.0)
             + Vec2::splat(1.0))
             * Vec2::splat(0.5);
@@ -739,8 +740,9 @@ impl ShadowCalculation {
         let shadow_map_atlas_texture = self.get_atlas_texture_at(light_slab, 0);
         // With these projected coordinates we can sample the depth map as the
         // resulting [0,1] coordinates from proj_coords directly correspond to
-        // the transformed NDC coordinates from the `ShadowMap::update` render pass.
-        // This gives us the closest depth from the light's point of view:
+        // the transformed NDC coordinates from the `ShadowMap::update` render
+        // pass. This gives us the closest depth from the light's point
+        // of view:
         let pcf_samples_2 = *pcf_samples as i32 / 2;
         let texel_size = 1.0
             / Vec2::new(
@@ -758,13 +760,15 @@ impl ShadowCalculation {
                 let shadow_map_depth = shadow_map
                     .sample_by_lod(*shadow_map_sampler, proj_coords, 0.0)
                     .x;
-                // To get the current depth at this fragment we simply retrieve the projected
-                // vector's z coordinate which equals the depth of this fragment
+                // To get the current depth at this fragment we simply retrieve
+                // the projected vector's z coordinate which
+                // equals the depth of this fragment
                 // from the light's perspective.
                 let fragment_depth = frag_pos_in_light_space.z;
 
-                // If the `current_depth`, which is the depth of the fragment from the lights
-                // POV, is greater than the `closest_depth` of the shadow map at
+                // If the `current_depth`, which is the depth of the fragment
+                // from the lights POV, is greater than the
+                // `closest_depth` of the shadow map at
                 // that fragment, the fragment is in shadow
                 crate::println!("current_depth: {fragment_depth}");
                 crate::println!("closest_depth: {shadow_map_depth}");
@@ -1098,8 +1102,8 @@ impl LightTilingInvocation {
         let frag_depth: f32 = depth_texture.fetch(frag_pos).x;
         // Fragment depth scaled to min/max of u32 values
         //
-        // This is so we can compare with normal atomic ops instead of using the float
-        // extension
+        // This is so we can compare with normal atomic ops instead of using the
+        // float extension
         let frag_depth_u32 = quantize_depth_f32_to_u32(frag_depth);
 
         // The tile's index in all the tiles
@@ -1149,10 +1153,10 @@ impl LightTilingInvocation {
         }
     }
 
-    // The difficulty here is that in SPIRV we can access `lighting_slab` atomically
-    // without wrapping it in a type, but on CPU we must pass an array of
-    // (something like) `AtomicU32`. I'm not sure how to model this interaction
-    // to test it on the CPU.
+    // The difficulty here is that in SPIRV we can access `lighting_slab`
+    // atomically without wrapping it in a type, but on CPU we must pass an
+    // array of (something like) `AtomicU32`. I'm not sure how to model this
+    // interaction to test it on the CPU.
     fn compute_light_lists(&self, geometry_slab: &[u32], lighting_slab: &mut [u32]) {
         let index = self.tile_index();
         let tile_id = self.descriptor.tiles_array.at(index);
@@ -1182,8 +1186,9 @@ impl LightTilingInvocation {
         //     ndc_tile_max.extend(depth_max),
         // );
 
-        // Get the frustum (here simplified to a line) in world coords, since we'll be
-        // using it to compare against the radius of illumination of each light
+        // Get the frustum (here simplified to a line) in world coords, since
+        // we'll be using it to compare against the radius of
+        // illumination of each light
         let tile_ndc_midpoint = self.tile_ndc_midpoint();
         let tile_line_ndc = (
             tile_ndc_midpoint.extend(depth_min),
@@ -1206,8 +1211,8 @@ impl LightTilingInvocation {
                 + LightingDescriptor::OFFSET_OF_ANALYTICAL_LIGHTS_ARRAY,
         );
 
-        // Each invocation will calculate a few lights' contribution to the tile, until
-        // all lights have been visited
+        // Each invocation will calculate a few lights' contribution to the
+        // tile, until all lights have been visited
         let next_light = NextLightIndex::new(
             self.global_id,
             self.descriptor.tile_size,
@@ -1233,7 +1238,8 @@ impl LightTilingInvocation {
                     (distance, point_light.intensity.0 / 683.0)
                 }
                 LightStyle::Spot => {
-                    // TODO: take into consideration the direction the spot light is pointing
+                    // TODO: take into consideration the direction the spot
+                    // light is pointing
                     let spot_light = lighting_slab.read(light.into_spot_id());
                     let center = Mat4::from(transform).transform_point3(spot_light.position);
                     let distance = crate::math::distance_to_line(center, tile_line.0, tile_line.1);
@@ -1246,8 +1252,9 @@ impl LightTilingInvocation {
                 radius_of_illumination(intensity_candelas, self.descriptor.minimum_illuminance_lux);
             let should_add = radius >= distance;
             if should_add {
-                // If the light should be added to the bin, get the next available index in the
-                // bin, then write the id of the light into that index.
+                // If the light should be added to the bin, get the next
+                // available index in the bin, then write the id
+                // of the light into that index.
                 let next_index = crate::sync::atomic_i_increment::<
                     { spirv_std::memory::Scope::Workgroup as u32 },
                     { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
@@ -1255,10 +1262,12 @@ impl LightTilingInvocation {
                 if next_index as usize >= tile_lights_array.len() {
                     // We've already filled the bin, so abort.
                     //
-                    // TODO: Figure out a better way to handle light tile list overrun.
+                    // TODO: Figure out a better way to handle light tile list
+                    // overrun.
                     break;
                 } else {
-                    // Get the id that corresponds to the next available index in the ratings bin
+                    // Get the id that corresponds to the next available index
+                    // in the ratings bin
                     let binned_light_id = tile_lights_array.at(next_index as usize);
                     // Write to that location
                     lighting_slab.write(binned_light_id, &light_id);

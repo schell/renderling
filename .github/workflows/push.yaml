@@ -13,7 +13,7 @@ env:
   CARGO_GPU_COMMITSH: 31153a8edd3bc626d4b9fb0cd7bdb7a8b30797d3
   # Nightly toolchain used for rustfmt in CI and in renderling-build's codegen.
   # Bump deliberately: reformat + regenerate shaders in the same PR.
-  RUST_NIGHTLY_TOOLCHAIN: nightly-2026-07-31
+  RUST_NIGHTLY_TOOLCHAIN: nightly-2026-10-10
 
 jobs:
   # Installs cargo deps and sets the cache directory for subsequent jobs

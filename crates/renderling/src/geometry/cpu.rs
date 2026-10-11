@@ -393,7 +393,8 @@ impl Geometry {
     pub fn use_camera(&self, camera: &Camera) {
         let id = camera.id();
         log::info!("using camera: {id:?}");
-        // Save a clone so we never lose the active camera, even if the user drops it
+        // Save a clone so we never lose the active camera, even if the user
+        // drops it
         self.descriptor.modify(|cfg| cfg.camera_id = id);
         *self.camera.lock().expect("geometry camera lock") = Some(camera.clone());
     }

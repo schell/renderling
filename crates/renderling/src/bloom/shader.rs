@@ -75,11 +75,11 @@ pub fn bloom_downsample_fragment(
     // d,e,g,h * 0.125
     // e,f,h,i * 0.125
     // j,k,l,m * 0.5
-    // This shows 5 square areas that are being sampled. But some of them overlap,
-    // so to have an energy preserving downsample we need to make some adjustments.
-    // The weights are the distributed so that the sum of j,k,l,m (e.g.)
-    // contribute 0.5 to the final color output. The code below is written
-    // to effectively yield this sum. We get:
+    // This shows 5 square areas that are being sampled. But some of them
+    // overlap, so to have an energy preserving downsample we need to make
+    // some adjustments. The weights are the distributed so that the sum of
+    // j,k,l,m (e.g.) contribute 0.5 to the final color output. The code
+    // below is written to effectively yield this sum. We get:
     // 0.125*5 + 0.03125*4 + 0.0625*4 = 1
     let f1 = 0.125;
     let f2 = 0.0625;

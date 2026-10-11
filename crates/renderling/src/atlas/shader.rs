@@ -31,7 +31,8 @@ impl AtlasTextureDescriptor {
         uv.x = self.modes.s.wrap(uv.x);
         uv.y = self.modes.t.wrap(uv.y);
 
-        // get the pixel index of the uv coordinate in terms of the original image
+        // get the pixel index of the uv coordinate in terms of the original
+        // image
         let mut px_index_s = (uv.x * self.size_px.x as f32) as u32;
         let mut px_index_t = (uv.y * self.size_px.y as f32) as u32;
 

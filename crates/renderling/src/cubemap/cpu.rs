@@ -92,17 +92,18 @@ impl SceneCubemap {
         let camera = stage.geometry.new_camera();
         stage.use_camera(&camera);
 
-        // By setting this to 90 degrees (PI/2 radians) we make sure the viewing field
-        // is exactly large enough to fill a single face of the cubemap such that all
-        // faces align correctly to each other at the edges.
+        // By setting this to 90 degrees (PI/2 radians) we make sure the viewing
+        // field is exactly large enough to fill a single face of the
+        // cubemap such that all faces align correctly to each other at
+        // the edges.
         let fovy = std::f32::consts::FRAC_PI_2;
         let aspect = self.cubemap_texture.width() as f32 / self.cubemap_texture.height() as f32;
         let projection = Mat4::perspective_lh(fovy, aspect, 1.0, 25.0);
-        // Render each face by rendering the scene from each camera angle into the
-        // cubemap
+        // Render each face by rendering the scene from each camera angle into
+        // the cubemap
         for (i, face) in CubemapFaceDirection::FACES.iter().enumerate() {
-            // Update the camera angle, no need to sync as calling `Stage::render` does this
-            // implicitly
+            // Update the camera angle, no need to sync as calling
+            // `Stage::render` does this implicitly
             camera.set_projection_and_view(projection, face.view());
             let label_s = format!("scene-to-cubemap-{i}");
             let view = self
@@ -294,7 +295,8 @@ mod test {
         let _camera = stage
             .new_camera()
             .with_projection_and_view(projection, view);
-        // geometry is the "clip cube" where colors are normalized 3d space coords
+        // geometry is the "clip cube" where colors are normalized 3d space
+        // coords
         let _rez = stage
             .new_primitive()
             .with_vertices(stage.new_vertices(UNIT_POINTS.map(|unit_cube_point| {

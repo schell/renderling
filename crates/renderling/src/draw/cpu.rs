@@ -210,8 +210,8 @@ impl DrawCalls {
         depth_texture: &Texture,
     ) -> Result<Option<SlabBuffer<wgpu::Buffer>>, CullingError> {
         let num_draw_calls = self.draw_count();
-        // Only do compute culling if there are things we need to draw, otherwise
-        // `wgpu` will err with something like:
+        // Only do compute culling if there are things we need to draw,
+        // otherwise `wgpu` will err with something like:
         // "Buffer with 'indirect draw upkeep' label binding size is zero"
         if num_draw_calls > 0 {
             log::trace!("num_draw_calls: {num_draw_calls}");
@@ -222,8 +222,9 @@ impl DrawCalls {
             if let Some(indirect) = &mut self.drawing_strategy.indirect {
                 if indirect.draws.len() != self.renderlets.len() {
                     indirect.invalidate();
-                    // Pre-upkeep to reclaim resources - this is necessary because
-                    // the draw buffer has to be contiguous (it can't start with a bunch of trash)
+                    // Pre-upkeep to reclaim resources - this is necessary
+                    // because the draw buffer has to be
+                    // contiguous (it can't start with a bunch of trash)
                     let indirect_buffer = indirect.slab.commit();
                     if indirect_buffer.is_new_this_commit() {
                         log::warn!("new indirect buffer");

@@ -281,8 +281,9 @@ impl RenderlingPaths {
             std::fs::write(&filepath, contents).unwrap();
         }
         // Just format the whole project. I know this is less than ideal,
-        // but people should be running with a formatter in their editor, and all of
-        // this is temporary given the wgsl-rs re-stacking happening this year (2026)
+        // but people should be running with a formatter in their editor, and
+        // all of this is temporary given the wgsl-rs re-stacking
+        // happening this year (2026)
         let fmt_toolchain =
             std::env::var("RUST_NIGHTLY_TOOLCHAIN").unwrap_or_else(|_| "nightly".into());
         std::process::Command::new("cargo")

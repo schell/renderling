@@ -572,12 +572,12 @@ mod test {
             .unwrap();
         stage.use_skybox(&skybox);
 
-        // Render once here because we found a bug where rendering before setting
-        // ibl would cause the primitive bindgroup to *not* be invalidated when
-        // ibl was set.
+        // Render once here because we found a bug where rendering before
+        // setting ibl would cause the primitive bindgroup to *not* be
+        // invalidated when ibl was set.
         //
-        // This essentially just ensures that `Stage::use_ibl` is invalidating the
-        // primitive bindgroup.
+        // This essentially just ensures that `Stage::use_ibl` is invalidating
+        // the primitive bindgroup.
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         frame.present();

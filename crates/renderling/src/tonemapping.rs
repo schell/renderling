@@ -120,8 +120,8 @@ pub fn tonemap(mut color: Vec4, slab: &[u32]) -> Vec4 {
         Tonemap::ACES_HILL => tone_map_aces_hill(color.xyz()).extend(color.w),
         Tonemap::ACES_HILL_EXPOSURE_BOOST => {
             // boost exposure as discussed in https://github.com/mrdoob/three.js/pull/19621
-            // this factor is based on the exposure correction of Krzysztof Narkowicz in his
-            // implemetation of ACES tone mapping
+            // this factor is based on the exposure correction of Krzysztof
+            // Narkowicz in his implemetation of ACES tone mapping
             tone_map_aces_hill(color.xyz() / 0.6).extend(color.w)
         }
         Tonemap::REINHARD => {
