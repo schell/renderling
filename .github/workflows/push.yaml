@@ -11,6 +11,9 @@ env:
   # For setup-rust, see https://github.com/moonrepo/setup-rust/issues/22
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   CARGO_GPU_COMMITSH: 31153a8edd3bc626d4b9fb0cd7bdb7a8b30797d3
+  # Nightly toolchain used for rustfmt in CI and in renderling-build's codegen.
+  # Bump deliberately: reformat + regenerate shaders in the same PR.
+  RUST_NIGHTLY_TOOLCHAIN: nightly-2026-07-31
 
 jobs:
   # Installs cargo deps and sets the cache directory for subsequent jobs
@@ -84,8 +87,8 @@ jobs:
               ${{ needs.install-cargo-gpu.outputs.cachepath-Linux }}
               ${{ needs.install-cargo-gpu.outputs.cachepath-Windows }}
           key: rust-gpu-cache-1-${{ matrix.os }}
-      - run: rustup install nightly
-      - run: rustup component add --toolchain nightly rustfmt
+      - run: rustup install $RUST_NIGHTLY_TOOLCHAIN
+      - run: rustup component add --toolchain $RUST_NIGHTLY_TOOLCHAIN rustfmt
       - run: cargo gpu show commitsh
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
       - run: cargo shaders
@@ -105,9 +108,9 @@ jobs:
           key: renderling-fmt-${{ env.CARGO_GPU_COMMITSH }}-ubuntu-24.04
       - run: mkdir -p $HOME/.cargo/bin
       - uses: moonrepo/setup-rust@v1
-      - run: rustup install nightly
-      - run: rustup component add --toolchain nightly rustfmt
-      - run: cargo +nightly fmt -- --check
+      - run: rustup install $RUST_NIGHTLY_TOOLCHAIN
+      - run: rustup component add --toolchain $RUST_NIGHTLY_TOOLCHAIN rustfmt
+      - run: cargo +$RUST_NIGHTLY_TOOLCHAIN fmt -- --check
 
   # BAU clippy lints
   renderling-clippy:
