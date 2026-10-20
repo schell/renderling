@@ -285,6 +285,82 @@ impl Texture {
     }
 
     /// Create a new texture.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_wgsl(
+        runtime: impl AsRef<craballoc_wgsl::prelude::WgpuRuntime>,
+        label: Option<&str>,
+        usage: Option<wgpu::TextureUsages>,
+        sampler: Option<wgpu::Sampler>,
+        format: wgpu::TextureFormat,
+        color_channels: u32,
+        color_channel_bytes: u32,
+        width: u32,
+        height: u32,
+        mip_level_count: u32,
+        data: &[u8],
+    ) -> Self {
+        let runtime = runtime.as_ref();
+        let device = &runtime.device;
+        let queue = &runtime.queue;
+        let mip_level_count = 1.max(mip_level_count);
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size,
+            mip_level_count,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: usage
+                .unwrap_or(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST),
+            view_formats: &[],
+        });
+
+        if !data.is_empty() {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                data,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(color_channels * color_channel_bytes * width),
+                    rows_per_image: None,
+                },
+                size,
+            );
+        }
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = sampler.unwrap_or_else(|| {
+            device.create_sampler(&wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::MipmapFilterMode::Linear,
+                ..Default::default()
+            })
+        });
+
+        Texture {
+            texture: Arc::new(texture),
+            view: Arc::new(view),
+            sampler: Arc::new(sampler),
+            id: get_next_texture_id(),
+        }
+    }
+
+    /// Create a new texture.
     ///
     /// This defaults the format to `Rgba8UnormSrgb` and assumes a pixel is 1
     /// byte per channel.

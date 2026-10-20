@@ -14,7 +14,7 @@ use crate::gltf::GltfDocument;
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
     bindgroup::ManagedBindGroup,
-    bloom::Bloom,
+    bloom::wgsl::Bloom,
     camera::{shader::CameraDescriptor, Camera},
     debug::DebugOverlay,
     draw::DrawCalls,
@@ -940,6 +940,14 @@ impl Stage {
         self.as_ref()
     }
 
+    /// Temporary method to convert the internally stored Rust-GPU craballoc
+    /// WgpuRuntime into a wgsl-rs craballoc WgpuRuntime.
+    // TODO: Remove this after the wgsl-rs port is done.
+    pub(crate) fn wgsl_rs_runtime(&self) -> craballoc_wgsl::runtime::WgpuRuntime {
+        let WgpuRuntime { device, queue } = self.runtime().clone();
+        craballoc_wgsl::runtime::WgpuRuntime { device, queue }
+    }
+
     pub fn device(&self) -> &wgpu::Device {
         &self.runtime().device
     }
@@ -966,7 +974,7 @@ impl Stage {
         let num_u32s = self.geometry.slab_allocator().len()
             + self.lighting.slab_allocator().len()
             + self.materials.slab_allocator().len()
-            + self.bloom.slab_allocator().len()
+            + self.bloom.arena().capacity() as usize
             + self.tonemapping.slab_allocator().len()
             + self
                 .draw_calls
@@ -1199,9 +1207,13 @@ impl Stage {
         let depth_texture =
             Texture::create_depth_texture(device, w, h, multisample_count, Some("stage-depth"));
         let msaa_render_target = Default::default();
-        // UNWRAP: safe because no other references at this point (created
-        // above^)
-        let bloom = Bloom::new(ctx, &hdr_texture.read().expect("hdr_texture read"));
+        let bloom = 
+            // UNWRAP: safe because no other references at this point (created
+            // above^)
+            Bloom::new(
+                ctx.wgsl_rs_runtime(),
+                &hdr_texture.read().expect("hdr_texture read"),
+            );
         let tonemapping = Tonemapping::new(
             runtime,
             ctx.get_render_target().format().add_srgb_suffix(),
@@ -1504,7 +1516,8 @@ impl Stage {
             sample_count,
             Some("stage-depth"),
         );
-        self.bloom.set_hdr_texture(self.runtime(), &hdr_texture);
+        self.bloom
+            .set_hdr_texture(self.wgsl_rs_runtime(), &hdr_texture);
         self.tonemapping
             .set_hdr_texture(self.device(), &hdr_texture);
         *self.hdr_texture.write().expect("hdr_texture write") = hdr_texture;
@@ -1688,7 +1701,7 @@ impl Stage {
 
         // then render bloom
         if self.has_bloom.load(Ordering::Relaxed) {
-            self.bloom.bloom(self.device(), self.queue());
+            self.bloom.bloom(self.wgsl_rs_runtime());
         } else {
             // copy the input hdr texture to the bloom mix texture
             let mut encoder =

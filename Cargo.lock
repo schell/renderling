@@ -862,8 +862,22 @@ checksum = "defed8174e995d5ecb5556d71bfe4d709dd4ce0b6a69f8ee2f6ab9797a22284e"
 dependencies = [
  "async-channel 1.9.0",
  "bytemuck",
- "crabslab",
- "crabslab-derive",
+ "crabslab 0.6.6",
+ "crabslab-derive 0.4.6",
+ "log",
+ "rustc-hash 1.1.0",
+ "snafu 0.8.9",
+ "tracing",
+ "wgpu",
+]
+
+[[package]]
+name = "craballoc"
+version = "0.5.0"
+dependencies = [
+ "async-channel 1.9.0",
+ "bytemuck",
+ "crabslab 0.7.1",
  "log",
  "rustc-hash 1.1.0",
  "snafu 0.8.9",
@@ -877,10 +891,19 @@ version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c9866f967260166a968eb2c7382c62f97bbf0a9896fa5c444730e49b3ca3f08"
 dependencies = [
- "crabslab-derive",
+ "crabslab-derive 0.4.6",
  "futures-lite 1.13.0",
  "glam",
  "spirv-std",
+]
+
+[[package]]
+name = "crabslab"
+version = "0.7.1"
+dependencies = [
+ "crabslab-derive 0.7.0",
+ "futures-lite 1.13.0",
+ "wgsl-rs",
 ]
 
 [[package]]
@@ -889,6 +912,16 @@ version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdc3fdfc4f885d410742aad05c6cc3d2867627be16f79f6f3859c2d0484ce778"
 dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
+name = "crabslab-derive"
+version = "0.7.0"
+dependencies = [
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 2.0.104",
@@ -1190,7 +1223,7 @@ name = "example"
 version = "0.1.0"
 dependencies = [
  "clap 4.5.40",
- "craballoc",
+ "craballoc 0.3.3",
  "env_logger",
  "futures-lite 1.13.0",
  "gltf",
@@ -2196,7 +2229,7 @@ checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2210,6 +2243,15 @@ name = "itertools"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
 dependencies = [
  "either",
 ]
@@ -2321,7 +2363,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.53.2",
 ]
 
 [[package]]
@@ -3685,7 +3727,7 @@ dependencies = [
  "built",
  "cfg-if",
  "interpolate_name",
- "itertools",
+ "itertools 0.12.1",
  "libc",
  "libfuzzer-sys",
  "log",
@@ -3841,8 +3883,11 @@ dependencies = [
  "bytemuck",
  "cfg_aliases",
  "console_log",
- "craballoc",
- "crabslab",
+ "craballoc 0.3.3",
+ "craballoc 0.5.0",
+ "crabslab 0.6.6",
+ "crabslab 0.7.1",
+ "crabslab-derive 0.4.6",
  "crunch",
  "ctor",
  "dagga",
@@ -3878,6 +3923,8 @@ dependencies = [
  "web-sys",
  "wgpu",
  "wgpu-core",
+ "wgsl-rs",
+ "wgsl-rs-linkage-wgpu",
  "winit",
  "wire-types",
 ]
@@ -3887,8 +3934,8 @@ name = "renderling-ui"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "craballoc",
- "crabslab",
+ "craballoc 0.3.3",
+ "crabslab 0.6.6",
  "env_logger",
  "futures-lite 1.13.0",
  "glam",
@@ -4030,7 +4077,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4043,7 +4090,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4366,7 +4413,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.104",
@@ -5436,6 +5483,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "wgsl-rs"
+version = "0.1.0-beta.6"
+dependencies = [
+ "glam",
+ "half",
+ "naga",
+ "paste",
+ "rayon",
+ "snafu 0.8.9",
+ "wgsl-rs-ir",
+ "wgsl-rs-macros",
+]
+
+[[package]]
+name = "wgsl-rs-ir"
+version = "0.1.0-beta.6"
+
+[[package]]
+name = "wgsl-rs-linkage-wgpu"
+version = "0.1.0-beta.6"
+dependencies = [
+ "snafu 0.8.9",
+ "wgpu",
+ "wgsl-rs",
+ "wgsl-rs-ir",
+]
+
+[[package]]
+name = "wgsl-rs-macros"
+version = "0.1.0-beta.6"
+dependencies = [
+ "itertools 0.14.0",
+ "proc-macro2",
+ "quote",
+ "snafu 0.8.9",
+ "syn 2.0.104",
+ "wgsl-rs-ir",
+]
+
+[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5457,7 +5544,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

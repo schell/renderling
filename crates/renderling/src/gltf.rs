@@ -278,6 +278,7 @@ impl Material {
                     builder.set_emissive_tex_coord(emissive_tex.tex_coord());
                 }
             }
+            builder.set_emissive_factor(Vec3::from(material.emissive_factor()));
             builder.set_emissive_strength_multiplier(material.emissive_strength().unwrap_or(1.0));
         };
         Ok(builder)

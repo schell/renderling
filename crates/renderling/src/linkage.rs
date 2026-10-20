@@ -9,10 +9,6 @@ use std::sync::Arc;
 
 pub mod atlas_blit_fragment;
 pub mod atlas_blit_vertex;
-pub mod bloom_downsample_fragment;
-pub mod bloom_mix_fragment;
-pub mod bloom_upsample_fragment;
-pub mod bloom_vertex;
 pub mod brdf_lut_convolution_fragment;
 pub mod brdf_lut_convolution_vertex;
 pub mod compositor_fragment;
