@@ -91,11 +91,12 @@ impl ShadowMap {
         let shadow_map_update_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: ShadowMap::LABEL,
-                bind_group_layouts: &[bindgroup_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(bindgroup_layout)],
+                immediate_size: 0,
             });
         let shadow_map_update_vertex = crate::linkage::shadow_mapping_vertex::linkage(device);
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            multiview_mask: None,
             label: Self::LABEL,
             layout: Some(&shadow_map_update_layout),
             vertex: wgpu::VertexState {
@@ -115,14 +116,13 @@ impl ShadowMap {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState::default(),
             fragment: None,
-            multiview: None,
             cache: None,
         })
     }
@@ -348,6 +348,7 @@ impl ShadowMap {
                 });
             {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    multiview_mask: None,
                     label: Self::LABEL,
                     color_attachments: &[],
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
@@ -385,7 +386,10 @@ impl ShadowMap {
             )?;
             let submission = queue.submit(Some(encoder.finish()));
             device
-                .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
+                .poll(wgpu::PollType::Wait {
+                    submission_index: Some(submission),
+                    timeout: None,
+                })
                 .context(PollSnafu)?;
         }
         Ok(())

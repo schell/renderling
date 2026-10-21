@@ -125,13 +125,19 @@ impl DrawCalls {
     ) -> Self {
         let supported_features = ctx.get_adapter().features();
         log::trace!("supported features: {supported_features:#?}");
-        let can_use_multi_draw_indirect = ctx.get_adapter().features().contains(
-            wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::MULTI_DRAW_INDIRECT,
-        );
+        let can_use_multi_draw_indirect = ctx
+            .get_adapter()
+            .features()
+            .contains(wgpu::Features::INDIRECT_FIRST_INSTANCE)
+            && ctx
+                .get_adapter()
+                .get_downlevel_capabilities()
+                .flags
+                .contains(wgpu::DownlevelFlags::INDIRECT_EXECUTION);
         if use_compute_culling && !can_use_multi_draw_indirect {
             log::warn!(
-                "`use_compute_culling` is `true`, but the MULTI_DRAW_INDIRECT feature is not \
-                 available. No compute culling will occur."
+                "`use_compute_culling` is `true`, but multi-draw indirect is not available. No \
+                 compute culling will occur."
             )
         }
         let can_use_compute_culling = use_compute_culling && can_use_multi_draw_indirect;

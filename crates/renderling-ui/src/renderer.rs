@@ -2165,6 +2165,7 @@ impl UiRenderer {
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                multiview_mask: None,
                 label: Self::LABEL,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: color_view,
@@ -2290,11 +2291,12 @@ impl UiRenderer {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Self::LABEL,
-            bind_group_layouts: &[bindgroup_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(bindgroup_layout)],
+            immediate_size: 0,
         });
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            multiview_mask: None,
             label: Self::LABEL,
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -2328,7 +2330,6 @@ impl UiRenderer {
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            multiview: None,
             cache: None,
         })
     }

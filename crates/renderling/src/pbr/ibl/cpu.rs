@@ -210,12 +210,13 @@ pub(crate) fn create_prefiltered_environment_pipeline_and_bindgroup(
     });
     let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
-        bind_group_layouts: &[&bg_layout],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(&bg_layout)],
+        immediate_size: 0,
     });
     let vertex_linkage = crate::linkage::prefilter_environment_cubemap_vertex::linkage(device);
     let fragment_linkage = crate::linkage::prefilter_environment_cubemap_fragment::linkage(device);
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        multiview_mask: None,
         label: Some("prefiltered environment"),
         layout: Some(&pp_layout),
         vertex: wgpu::VertexState {
@@ -252,7 +253,6 @@ pub(crate) fn create_prefiltered_environment_pipeline_and_bindgroup(
             })],
             compilation_options: Default::default(),
         }),
-        multiview: None,
         cache: None,
     });
     (pipeline, bindgroup)
@@ -311,6 +311,7 @@ fn create_prefiltered_environment_map(
             buffer_upkeep();
             {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    multiview_mask: None,
                     label: Some(&format!("cubemap{i}")),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &cubemap_face.view,
@@ -418,12 +419,13 @@ impl DiffuseIrradianceConvolutionRenderPipeline {
         let bg_layout = diffuse_irradiance_convolution_bindgroup_layout(device);
         let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("convolution pipeline layout"),
-            bind_group_layouts: &[&bg_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bg_layout)],
+            immediate_size: 0,
         });
 
         DiffuseIrradianceConvolutionRenderPipeline(device.create_render_pipeline(
             &wgpu::RenderPipelineDescriptor {
+                multiview_mask: None,
                 label: Some("convolution pipeline"),
                 layout: Some(&pp_layout),
                 vertex: wgpu::VertexState {
@@ -457,7 +459,6 @@ impl DiffuseIrradianceConvolutionRenderPipeline {
                     })],
                     compilation_options: Default::default(),
                 }),
-                multiview: None,
                 cache: None,
             },
         ))

@@ -162,8 +162,8 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         let bindgroup_layout = Self::create_bindgroup_layout(device, multisampled);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: LABEL,
-            bind_group_layouts: &[&bindgroup_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bindgroup_layout)],
+            immediate_size: 0,
         });
         (pipeline_layout, bindgroup_layout)
     }

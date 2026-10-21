@@ -25,6 +25,7 @@ fn create_pipeline(
     let vertex_linkage = crate::linkage::generate_mipmap_vertex::linkage(device);
     let fragment_linkage = crate::linkage::generate_mipmap_fragment::linkage(device);
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        multiview_mask: None,
         label: LABEL,
         layout: Some(pp_layout),
         vertex: wgpu::VertexState {
@@ -51,7 +52,6 @@ fn create_pipeline(
         }),
         depth_stencil: None,
         multisample: wgpu::MultisampleState::default(),
-        multiview: None,
         cache: None,
     })
 }
@@ -87,8 +87,8 @@ impl MipMapGenerator {
         });
         let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: LABEL,
-            bind_group_layouts: &[&bg_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bg_layout)],
+            immediate_size: 0,
         });
         let pipeline = create_pipeline(device, format, &pp_layout);
         Self {
@@ -173,6 +173,7 @@ impl MipMapGenerator {
 
             {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    multiview_mask: None,
                     label: Some(&format!("mip{mip_level}")),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &mip_texture.view,

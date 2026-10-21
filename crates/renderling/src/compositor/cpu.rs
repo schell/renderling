@@ -55,14 +55,15 @@ impl Compositor {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("compositor"),
-            bind_group_layouts: &[&bindgroup_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bindgroup_layout)],
+            immediate_size: 0,
         });
 
         let vertex = crate::linkage::compositor_vertex::linkage(device);
         let fragment = crate::linkage::compositor_fragment::linkage(device);
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            multiview_mask: None,
             label: Some("compositor"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -92,7 +93,6 @@ impl Compositor {
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            multiview: None,
             cache: None,
         });
 
@@ -136,6 +136,7 @@ impl Compositor {
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                multiview_mask: None,
                 label: Some("compositor"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: target,

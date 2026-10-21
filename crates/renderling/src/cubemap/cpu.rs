@@ -219,11 +219,12 @@ impl EquirectangularImageToCubemapBlitter {
         let bg_layout = Self::create_bindgroup_layout(device);
         let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("cubemap-making pipeline layout"),
-            bind_group_layouts: &[&bg_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bg_layout)],
+            immediate_size: 0,
         });
         EquirectangularImageToCubemapBlitter(device.create_render_pipeline(
             &wgpu::RenderPipelineDescriptor {
+                multiview_mask: None,
                 label: Some("cubemap-making pipeline"),
                 layout: Some(&pp_layout),
                 vertex: wgpu::VertexState {
@@ -257,7 +258,6 @@ impl EquirectangularImageToCubemapBlitter {
                     })],
                     compilation_options: Default::default(),
                 }),
-                multiview: None,
                 cache: None,
             },
         ))
@@ -364,14 +364,15 @@ mod test {
             ctx.get_device()
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label,
-                    bind_group_layouts: &[&bind_group_layout],
-                    push_constant_ranges: &[],
+                    bind_group_layouts: &[Some(&bind_group_layout)],
+                    immediate_size: 0,
                 });
         let vertex = crate::linkage::cubemap_sampling_test_vertex::linkage(ctx.get_device());
         let fragment = crate::linkage::cubemap_sampling_test_fragment::linkage(ctx.get_device());
         let cubemap_sampling_pipeline =
             ctx.get_device()
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    multiview_mask: None,
                     label,
                     layout: Some(&cubemap_sampling_pipeline_layout),
                     vertex: wgpu::VertexState {
@@ -401,7 +402,6 @@ mod test {
                             write_mask: wgpu::ColorWrites::all(),
                         })],
                     }),
-                    multiview: None,
                     cache: None,
                 });
 
@@ -462,6 +462,7 @@ mod test {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
             {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    multiview_mask: None,
                     label,
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &render_target_view,
@@ -487,7 +488,10 @@ mod test {
             }
             let submission_index = ctx.get_queue().submit(Some(encoder.finish()));
             ctx.get_device()
-                .poll(wgpu::PollType::WaitForSubmissionIndex(submission_index))
+                .poll(wgpu::PollType::Wait {
+                    submission_index: Some(submission_index),
+                    timeout: None,
+                })
                 .unwrap();
 
             let img = Texture::read(&ctx, &render_target, 1, 1, 4, 1)

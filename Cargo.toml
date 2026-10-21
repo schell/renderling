@@ -25,7 +25,7 @@ bytemuck = { version = "1.19.0", features = ["derive"] }
 cfg_aliases = "0.2"
 clap = { version = "4.5.23", features = ["derive"] }
 console_log = "1.0.0"
-craballoc = { version = "0.3.1" } 
+craballoc = { version = "0.3.3" } 
 crabslab = { version = "0.6.6", default-features = false }
 plotters = "0.3.7"
 ctor = "0.2.2"
@@ -40,7 +40,7 @@ image = "0.25"
 log = "0.4"
 loading-bytes = { path = "crates/loading-bytes", version = "0.1.1" }
 lyon = "1.0.1"
-naga = { version = "26.0", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
+naga = { version = "30.0", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
 new_mime_guess = "4.0.4"
 pretty_assertions = "1.4.0"
 proc-macro2 = { version = "1.0", features = ["span-locations"] }
@@ -62,8 +62,8 @@ wasm-bindgen-futures = "0.4"
 wasm-bindgen-test = "0.3"
 web-sys = "0.3"
 winit = { version = "0.30.12" }
-wgpu = { version = "26.0" }
-wgpu-core = { version = "26.0" }
+wgpu = { version = "30.0" }
+wgpu-core = { version = "30.0" }
 metal = "0.32"
 
 [profile.dev]
