@@ -287,7 +287,15 @@ pub fn capture_gpu_frame<T>(
         desc.set_output_url(path);
         let maybe_metal_device = unsafe { ctx.get_device().as_hal::<wgpu_core::api::Metal>() };
         if let Some(metal_device) = maybe_metal_device {
-            desc.set_capture_device(metal_device.raw_device().try_lock().unwrap().as_ref());
+            // Since wgpu 29 the underlying `MTLDevice` is exposed as an objc2
+            // handle (`Retained<MTLDevice>`), while the `metal` crate wraps
+            // the raw Objective-C pointer. Bridge the two via the raw pointer.
+            // The device is kept alive by the wgpu device for the duration of
+            // this function, and the capture descriptor retains the device
+            // itself when it is set, so the non-owning wrapper is sound here.
+            let mtl = &**metal_device.raw_device();
+            let device = unsafe { &*(mtl as *const _ as *const metal::DeviceRef) };
+            desc.set_capture_device(device);
         } else {
             panic!("not a capturable device")
         }
@@ -404,6 +412,51 @@ mod test {
                 .with_position([100.0, 0.0, 0.0])
                 .with_color([1.0, 0.0, 1.0, 1.0]),
         ]
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    // Verifies the Metal GPU frame capture glue, which bridges the objc2
+    // `MTLDevice` handle from wgpu to the `metal` crate. Only runs when
+    // `METAL_CAPTURE_ENABLED` is set, since trace capture needs an explicit
+    // opt-in; without it this test is a no-op, so CI is unaffected.
+    fn gpu_frame_capture_sanity() {
+        if std::env::var("METAL_CAPTURE_ENABLED").is_err() {
+            log::info!("skipping gpu_frame_capture_sanity, set METAL_CAPTURE_ENABLED=1 to run it");
+            return;
+        }
+        let ctx = Context::headless(100, 100).block();
+        let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
+        let (p, v) = crate::camera::default_ortho2d(100.0, 100.0);
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
+        let _prim = stage
+            .new_primitive()
+            .with_vertices(stage.new_vertices(right_tri_vertices()));
+
+        let frame = ctx.get_next_frame().unwrap();
+        let filename = "gpu_frame_capture_sanity.gputrace";
+        capture_gpu_frame(&ctx, filename, || {
+            stage.render(&frame.view());
+            frame.present();
+        });
+        let path = workspace_dir().join("test_output").join(filename);
+        assert!(path.exists(), "expected a GPU trace at {}", path.display());
+        // Depending on the macOS version the trace is written either as a
+        // directory bundle or as a single file.
+        let size: u64 = if path.is_dir() {
+            std::fs::read_dir(&path)
+                .unwrap()
+                .map(|entry| entry.unwrap().metadata().unwrap().len())
+                .sum()
+        } else {
+            std::fs::metadata(&path).unwrap().len()
+        };
+        assert!(size > 0, "GPU trace should not be empty");
+        log::info!(
+            "wrote a {} byte GPU frame trace to {}",
+            size,
+            path.display()
+        );
     }
 
     #[test]

@@ -301,6 +301,7 @@ impl StageRendering<'_> {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                multiview_mask: None,
                 label,
                 color_attachments: &[Some(self.color_attachment)],
                 depth_stencil_attachment: Some(self.depth_stencil_attachment),
@@ -1124,11 +1125,12 @@ impl Stage {
         let bind_group_layout = Self::primitive_pipeline_bindgroup_layout(device);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label,
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
         });
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            multiview_mask: None,
             label,
             layout: Some(&layout),
             vertex: wgpu::VertexState {
@@ -1148,8 +1150,8 @@ impl Stage {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -1168,7 +1170,6 @@ impl Stage {
                 })],
                 compilation_options: Default::default(),
             }),
-            multiview: None,
             cache: None,
         })
     }
@@ -1927,8 +1928,8 @@ mod test {
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: None,
-                    bind_group_layouts: &[&bindgroup_layout],
-                    push_constant_ranges: &[],
+                    bind_group_layouts: &[Some(&bindgroup_layout)],
+                    immediate_size: 0,
                 });
 
         let vertex = crate::linkage::slabbed_vertices::linkage(&runtime.device);
@@ -1936,6 +1937,7 @@ mod test {
         let pipeline = runtime
             .device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                multiview_mask: None,
                 label: None,
                 cache: None,
                 layout: Some(&pipeline_layout),
@@ -1970,7 +1972,6 @@ mod test {
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
-                multiview: None,
             });
         let slab_buffer = slab.commit();
 
@@ -1989,6 +1990,7 @@ mod test {
         let mut encoder = runtime.device.create_command_encoder(&Default::default());
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                multiview_mask: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &frame.view(),
                     resolve_target: None,

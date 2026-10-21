@@ -21,3 +21,7 @@ The fmt toolchain is pinned to `nightly-2026-10-10` via `RUST_NIGHTLY_TOOLCHAIN`
 
 ## Disallowed Methods (clippy.toml)
 Avoid: `Vec{2,3,4}::normalize_or_zero`, `Mat4::to_scale_rotation_translation`, `f32::signum`
+
+## Beads
+
+The bead prefix for this project is `rling`.

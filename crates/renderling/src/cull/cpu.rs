@@ -136,8 +136,8 @@ impl ComputeCulling {
             layout: Some(
                 &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Self::LABEL,
-                    bind_group_layouts: &[&bindgroup_layout],
-                    push_constant_ranges: &[],
+                    bind_group_layouts: &[Some(&bindgroup_layout)],
+                    immediate_size: 0,
                 }),
             ),
             module: &linkage.module,
@@ -388,8 +388,8 @@ impl ComputeCopyDepth {
             layout: Some(
                 &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Self::LABEL,
-                    bind_group_layouts: &[bindgroup_layout],
-                    push_constant_ranges: &[],
+                    bind_group_layouts: &[Some(bindgroup_layout)],
+                    immediate_size: 0,
                 }),
             ),
             module: &linkage.module,
@@ -545,8 +545,8 @@ impl ComputeDownsampleDepth {
             layout: Some(
                 &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Self::LABEL,
-                    bind_group_layouts: &[bindgroup_layout],
-                    push_constant_ranges: &[],
+                    bind_group_layouts: &[Some(bindgroup_layout)],
+                    immediate_size: 0,
                 }),
             ),
             module: &linkage.module,

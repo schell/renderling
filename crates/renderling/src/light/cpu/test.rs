@@ -352,7 +352,9 @@ fn clear_tiles_sanity() {
             });
         }
         let _ = lighting.commit();
-        ctx.get_device().poll(wgpu::PollType::Wait).unwrap();
+        ctx.get_device()
+            .poll(wgpu::PollType::wait_indefinitely())
+            .unwrap();
 
         let (mins, maxs, lights) = futures_lite::future::block_on(tiling.read_images(lighting));
         img_diff::assert_img_eq("light/tiling/clear_tiles/1-mins.png", mins);
@@ -713,7 +715,9 @@ fn tiling_e2e_sanity_with(
                 let frame = ctx.get_next_frame().unwrap();
                 stage.render(&frame.view());
                 frame.present();
-                ctx.get_device().poll(wgpu::PollType::Wait).unwrap();
+                ctx.get_device()
+                    .poll(wgpu::PollType::wait_indefinitely())
+                    .unwrap();
                 let duration = start.elapsed();
                 run.iterations.push((*with_tiling, duration));
             }

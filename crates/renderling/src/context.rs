@@ -123,8 +123,8 @@ impl RenderTarget {
 #[snafu(visibility(pub(crate)))]
 /// Represents errors that can occur within the rendering context.
 pub enum ContextError {
-    #[snafu(display("missing surface texture: {}", source))]
-    Surface { source: wgpu::SurfaceError },
+    #[snafu(display("could not get current surface texture: {status}"))]
+    CurrentSurfaceTexture { status: &'static str },
 
     #[snafu(display("cannot create adaptor: {source}"))]
     CannotCreateAdaptor { source: wgpu::RequestAdapterError },
@@ -143,6 +143,34 @@ pub enum ContextError {
 pub struct FrameTextureView {
     pub view: Arc<wgpu::TextureView>,
     pub format: wgpu::TextureFormat,
+}
+
+fn surface_texture_or_status(
+    current: wgpu::CurrentSurfaceTexture,
+) -> Result<wgpu::SurfaceTexture, ContextError> {
+    match current {
+        // NOTE: suboptimal textures are still renderable and presentable,
+        // this mirrors the behavior of `Surface::get_current_texture` in
+        // wgpu 26, which returned suboptimal textures alongside a flag.
+        wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
+            Ok(t)
+        }
+        wgpu::CurrentSurfaceTexture::Timeout => {
+            Err(ContextError::CurrentSurfaceTexture { status: "timeout" })
+        }
+        wgpu::CurrentSurfaceTexture::Occluded => {
+            Err(ContextError::CurrentSurfaceTexture { status: "occluded" })
+        }
+        wgpu::CurrentSurfaceTexture::Outdated => {
+            Err(ContextError::CurrentSurfaceTexture { status: "outdated" })
+        }
+        wgpu::CurrentSurfaceTexture::Lost => {
+            Err(ContextError::CurrentSurfaceTexture { status: "lost" })
+        }
+        wgpu::CurrentSurfaceTexture::Validation => Err(ContextError::CurrentSurfaceTexture {
+            status: "validation",
+        }),
+    }
 }
 
 impl Deref for FrameTextureView {
@@ -287,8 +315,9 @@ impl Frame {
     /// Presents the surface frame if the frame is a `TargetFrame::Surface`.
     /// If the frame is a `TargetFrame::Texture`, this is a no-op.
     pub fn present(self) {
-        match self.surface {
-            FrameSurface::Surface(s) => s.present(),
+        let Self { runtime, surface } = self;
+        match surface {
+            FrameSurface::Surface(s) => runtime.queue.present(s),
             FrameSurface::Texture(_) => {}
         }
     }
@@ -515,7 +544,7 @@ impl Context {
             runtime: self.runtime.clone(),
             surface: match &self.render_target.0 {
                 RenderTargetInner::Surface { surface, .. } => {
-                    let surface_texture = surface.get_current_texture().context(SurfaceSnafu)?;
+                    let surface_texture = surface_texture_or_status(surface.get_current_texture())?;
                     FrameSurface::Surface(surface_texture)
                 }
                 RenderTargetInner::Texture { texture, .. } => {

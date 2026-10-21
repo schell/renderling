@@ -61,7 +61,10 @@ impl InnerApp {
                 self.app.set_size(size);
             }
             winit::event::WindowEvent::RedrawRequested => {
-                self.ctx.get_device().poll(wgpu::PollType::Wait).unwrap();
+                self.ctx
+                    .get_device()
+                    .poll(wgpu::PollType::wait_indefinitely())
+                    .unwrap();
             }
             e => self.app.camera_controller.window_event(e),
         }

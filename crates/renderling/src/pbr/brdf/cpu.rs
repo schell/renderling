@@ -18,6 +18,7 @@ impl BrdfLut {
         let vertex_linkage = crate::linkage::brdf_lut_convolution_vertex::linkage(device);
         let fragment_linkage = crate::linkage::brdf_lut_convolution_fragment::linkage(device);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            multiview_mask: None,
             label: Some("brdf_lut_convolution"),
             layout: None,
             vertex: wgpu::VertexState {
@@ -54,7 +55,6 @@ impl BrdfLut {
                 })],
                 compilation_options: Default::default(),
             }),
-            multiview: None,
             cache: None,
         });
 
@@ -79,6 +79,7 @@ impl BrdfLut {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                multiview_mask: None,
                 label: Some("brdf_lut_convolution"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &framebuffer.view,

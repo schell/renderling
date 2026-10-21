@@ -48,8 +48,8 @@ impl DebugOverlay {
     ) -> wgpu::PipelineLayout {
         device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Self::LABEL,
-            bind_group_layouts: &[bindgroup_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(bindgroup_layout)],
+            immediate_size: 0,
         })
     }
 
@@ -61,6 +61,7 @@ impl DebugOverlay {
         let vertex = crate::linkage::debug_overlay_vertex::linkage(device);
         let fragment = crate::linkage::debug_overlay_fragment::linkage(device);
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            multiview_mask: None,
             label: Self::LABEL,
             layout: Some(&Self::create_pipeline_layout(device, bindgroup_layout)),
             vertex: wgpu::VertexState {
@@ -91,7 +92,6 @@ impl DebugOverlay {
                     write_mask: wgpu::ColorWrites::all(),
                 })],
             }),
-            multiview: None,
             cache: None,
         })
     }
@@ -141,6 +141,7 @@ impl DebugOverlay {
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Self::LABEL });
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                multiview_mask: None,
                 label: Self::LABEL,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,

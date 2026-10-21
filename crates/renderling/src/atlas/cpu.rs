@@ -270,7 +270,7 @@ impl Atlas {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         };
 
@@ -1002,6 +1002,7 @@ impl AtlasBlittingOperation {
                 array_layer_count: Some(1),
             });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            multiview_mask: None,
             label: Some("atlas-blitter"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &atlas_view,
@@ -1099,13 +1100,14 @@ impl AtlasBlitter {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("atlas-blitter"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
         });
 
         let vertex = crate::linkage::atlas_blit_vertex::linkage(device);
         let fragment = crate::linkage::atlas_blit_fragment::linkage(device);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            multiview_mask: None,
             label: Some("atlas-blitter"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -1135,7 +1137,6 @@ impl AtlasBlitter {
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            multiview: None,
             cache: None,
         });
 
