@@ -39,8 +39,6 @@ pub mod skybox_cubemap_fragment;
 pub mod skybox_cubemap_vertex;
 pub mod skybox_equirectangular_fragment;
 pub mod skybox_vertex;
-pub mod tonemapping_fragment;
-pub mod tonemapping_vertex;
 
 // 2D/UI shaders
 pub mod ui_fragment;

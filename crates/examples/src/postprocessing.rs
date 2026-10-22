@@ -85,12 +85,12 @@ async fn manual_postprocessing() {
     // ANCHOR_END: exposure
 
     // ANCHOR: tonemap
-    use renderling::tonemapping::Tonemap;
+    use renderling::tonemapping::shader::Tonemap;
 
-    // By default no tone mapping algorithm is used (`Tonemap::NONE`), and
+    // By default no tone mapping algorithm is used (`Tonemap::None`), and
     // HDR values outside the display range simply clip. A filmic operator
     // like ACES compresses the highlights instead.
-    config.tonemap = Tonemap::ACES_HILL_EXPOSURE_BOOST;
+    config.tonemap = Tonemap::AcesHillExposureBoost;
     config.exposure = 1.0;
     stage.tonemapping().set_tonemapping_config(config);
 
@@ -103,7 +103,9 @@ async fn manual_postprocessing() {
 
     // Each step should have changed the rendering.
     let pixel_diff = |a: &[u8], b: &[u8]| {
-        a.chunks_exact(4)
+        a.as_chunks::<4>()
+            .0
+            .iter()
             .zip(b.chunks_exact(4))
             .filter(|(a, b)| a != b)
             .count()

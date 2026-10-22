@@ -1237,7 +1237,7 @@ where
     Ct: IsContainer<Pointer<u32> = Array<u32>>,
 {
     pub fn renderlets_iter(&self) -> impl Iterator<Item = &Primitive> {
-        self.primitives.iter().flat_map(|(_, rs)| rs.iter())
+        self.primitives.values().flat_map(|rs| rs.iter())
     }
 
     fn collect_nodes_recursive<'a>(&'a self, node_index: usize, nodes: &mut Vec<&'a GltfNode>) {

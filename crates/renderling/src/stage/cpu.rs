@@ -31,7 +31,7 @@ use crate::{
     primitive::Primitive,
     skybox::{Skybox, SkyboxRenderPipeline},
     texture::{DepthTexture, Texture},
-    tonemapping::Tonemapping,
+    tonemapping::wgsl::Tonemapping,
     transform::{NestedTransform, Transform},
 };
 
@@ -414,8 +414,8 @@ pub struct Stage {
     pub(crate) clear_depth_attachments: Arc<AtomicBool>,
 
     pub(crate) bloom: Bloom,
-
     pub(crate) tonemapping: Tonemapping,
+
     pub(crate) debug_overlay: DebugOverlay,
     pub(crate) background_color: Arc<RwLock<wgpu::Color>>,
 
@@ -975,7 +975,7 @@ impl Stage {
             + self.lighting.slab_allocator().len()
             + self.materials.slab_allocator().len()
             + self.bloom.arena().capacity() as usize
-            + self.tonemapping.slab_allocator().len()
+            + self.tonemapping.arena().length() as usize
             + self
                 .draw_calls
                 .read()
@@ -1207,15 +1207,14 @@ impl Stage {
         let depth_texture =
             Texture::create_depth_texture(device, w, h, multisample_count, Some("stage-depth"));
         let msaa_render_target = Default::default();
-        let bloom = 
-            // UNWRAP: safe because no other references at this point (created
-            // above^)
-            Bloom::new(
-                ctx.wgsl_rs_runtime(),
-                &hdr_texture.read().expect("hdr_texture read"),
-            );
+        // UNWRAP: safe because no other references at this point (created
+        // above^)
+        let bloom = Bloom::new(
+            ctx.wgsl_rs_runtime(),
+            &hdr_texture.read().expect("hdr_texture read"),
+        );
         let tonemapping = Tonemapping::new(
-            runtime,
+            ctx.wgsl_rs_runtime(),
             ctx.get_render_target().format().add_srgb_suffix(),
             &bloom.get_mix_texture(),
         );
@@ -1518,8 +1517,7 @@ impl Stage {
         );
         self.bloom
             .set_hdr_texture(self.wgsl_rs_runtime(), &hdr_texture);
-        self.tonemapping
-            .set_hdr_texture(self.device(), &hdr_texture);
+        self.tonemapping.set_hdr_texture(&hdr_texture);
         *self.hdr_texture.write().expect("hdr_texture write") = hdr_texture;
 
         let _ = self
@@ -1733,7 +1731,7 @@ impl Stage {
         }
 
         // then render tonemapping
-        self.tonemapping.render(self.device(), self.queue(), view);
+        self.tonemapping.render(self.wgsl_rs_runtime(), view);
 
         // then render the debug overlay
         if self.has_debug_overlay.load(Ordering::Relaxed) {

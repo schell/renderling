@@ -160,16 +160,6 @@
     "wgsl_entry_point": "skyboxshaderskybox_vertex"
   },
   {
-    "entry_point": "tonemapping::tonemapping_fragment",
-    "source_path": "shaders/tonemapping-tonemapping_fragment.spv",
-    "wgsl_entry_point": "tonemappingtonemapping_fragment"
-  },
-  {
-    "entry_point": "tonemapping::tonemapping_vertex",
-    "source_path": "shaders/tonemapping-tonemapping_vertex.spv",
-    "wgsl_entry_point": "tonemappingtonemapping_vertex"
-  },
-  {
     "entry_point": "tutorial::implicit_isosceles_vertex",
     "source_path": "shaders/tutorial-implicit_isosceles_vertex.spv",
     "wgsl_entry_point": "tutorialimplicit_isosceles_vertex"

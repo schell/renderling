@@ -64,12 +64,12 @@ web-sys = "0.3"
 winit = { version = "0.30.12" }
 wgpu = { version = "30.0" }
 wgpu-core = { version = "30.0" }
-wgsl-rs = { path = "/Users/schell/code/wgsl-rs/main/crates/wgsl-rs" }# git = "https://github.com/schell/wgsl-rs" }#version = "0.1.0-beta.5" }
-wgsl-rs-linkage-wgpu = { path = "/Users/schell/code/wgsl-rs/main/crates/wgsl-rs-linkage-wgpu" }
+wgsl-rs = { git = "https://github.com/schell/wgsl-rs", branch = "feat-std-display-impls" }
+wgsl-rs-linkage-wgpu = { git = "https://github.com/schell/wgsl-rs", branch = "feat-std-display-impls" }
 metal = "0.32"
 
-crabslab_wgsl = { package = "crabslab", path = "/Users/schell/code/crabslab/feat-wgsl-rs-std-slabitem/crates/crabslab" }#git = "https://github.com/schell/crabslab", branch = "feat-wgsl-rs-std-slabitem" }#version = "0.7.1" }
-craballoc_wgsl = { package = "craballoc", path = "/Users/schell/code/crabslab/feat-wgsl-rs-std-slabitem/crates/craballoc" }#git = "https://github.com/schell/crabslab", branch = "feat-wgsl-rs-std-slabitem" }#version = "0.5" }
+crabslab_wgsl = { package = "crabslab", git = "https://github.com/schell/crabslab", branch = "feat-wgsl-rs-std-slabitem" }
+craballoc_wgsl = { package = "craballoc", git = "https://github.com/schell/crabslab", branch = "feat-wgsl-rs-std-slabitem" }
 
 [profile.dev]
 opt-level = 1
