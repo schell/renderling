@@ -10,16 +10,6 @@
     "wgsl_entry_point": "atlasshaderatlas_blit_vertex"
   },
   {
-    "entry_point": "compositor::compositor_fragment",
-    "source_path": "shaders/compositor-compositor_fragment.spv",
-    "wgsl_entry_point": "compositorcompositor_fragment"
-  },
-  {
-    "entry_point": "compositor::compositor_vertex",
-    "source_path": "shaders/compositor-compositor_vertex.spv",
-    "wgsl_entry_point": "compositorcompositor_vertex"
-  },
-  {
     "entry_point": "convolution::shader::brdf_lut_convolution_fragment",
     "source_path": "shaders/convolution-shader-brdf_lut_convolution_fragment.spv",
     "wgsl_entry_point": "convolutionshaderbrdf_lut_convolution_fragment"

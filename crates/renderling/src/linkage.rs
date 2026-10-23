@@ -11,8 +11,6 @@ pub mod atlas_blit_fragment;
 pub mod atlas_blit_vertex;
 pub mod brdf_lut_convolution_fragment;
 pub mod brdf_lut_convolution_vertex;
-pub mod compositor_fragment;
-pub mod compositor_vertex;
 pub mod compute_copy_depth_to_pyramid;
 pub mod compute_copy_depth_to_pyramid_multisampled;
 pub mod compute_culling;
