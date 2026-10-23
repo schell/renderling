@@ -107,8 +107,10 @@ async fn manual_culling() {
     // ANCHOR_END: culling
 
     let pixel_diff = |a: &[u8], b: &[u8]| {
-        a.chunks_exact(4)
-            .zip(b.chunks_exact(4))
+        a.as_chunks::<4>()
+            .0
+            .iter()
+            .zip(b.as_chunks::<4>().0.iter())
             .filter(|(a, b)| a != b)
             .count()
     };
@@ -236,8 +238,10 @@ async fn manual_light_tiling() {
 
     // Tiling should produce nearly the same picture for much less work.
     let pixel_diff = |a: &[u8], b: &[u8]| {
-        a.chunks_exact(4)
-            .zip(b.chunks_exact(4))
+        a.as_chunks::<4>()
+            .0
+            .iter()
+            .zip(b.as_chunks::<4>().0.iter())
             .filter(|(a, b)| a != b)
             .count()
     };

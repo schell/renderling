@@ -14,7 +14,7 @@ use crate::gltf::GltfDocument;
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
     bindgroup::ManagedBindGroup,
-    bloom::Bloom,
+    bloom::wgsl::Bloom,
     camera::{shader::CameraDescriptor, Camera},
     debug::DebugOverlay,
     draw::DrawCalls,
@@ -31,7 +31,7 @@ use crate::{
     primitive::Primitive,
     skybox::{Skybox, SkyboxRenderPipeline},
     texture::{DepthTexture, Texture},
-    tonemapping::Tonemapping,
+    tonemapping::wgsl::Tonemapping,
     transform::{NestedTransform, Transform},
 };
 
@@ -414,8 +414,8 @@ pub struct Stage {
     pub(crate) clear_depth_attachments: Arc<AtomicBool>,
 
     pub(crate) bloom: Bloom,
-
     pub(crate) tonemapping: Tonemapping,
+
     pub(crate) debug_overlay: DebugOverlay,
     pub(crate) background_color: Arc<RwLock<wgpu::Color>>,
 
@@ -940,6 +940,14 @@ impl Stage {
         self.as_ref()
     }
 
+    /// Temporary method to convert the internally stored Rust-GPU craballoc
+    /// WgpuRuntime into a wgsl-rs craballoc WgpuRuntime.
+    // TODO: Remove this after the wgsl-rs port is done.
+    pub(crate) fn wgsl_rs_runtime(&self) -> craballoc_wgsl::runtime::WgpuRuntime {
+        let WgpuRuntime { device, queue } = self.runtime().clone();
+        craballoc_wgsl::runtime::WgpuRuntime { device, queue }
+    }
+
     pub fn device(&self) -> &wgpu::Device {
         &self.runtime().device
     }
@@ -966,8 +974,8 @@ impl Stage {
         let num_u32s = self.geometry.slab_allocator().len()
             + self.lighting.slab_allocator().len()
             + self.materials.slab_allocator().len()
-            + self.bloom.slab_allocator().len()
-            + self.tonemapping.slab_allocator().len()
+            + self.bloom.arena().capacity() as usize
+            + self.tonemapping.arena().length() as usize
             + self
                 .draw_calls
                 .read()
@@ -1201,9 +1209,12 @@ impl Stage {
         let msaa_render_target = Default::default();
         // UNWRAP: safe because no other references at this point (created
         // above^)
-        let bloom = Bloom::new(ctx, &hdr_texture.read().expect("hdr_texture read"));
+        let bloom = Bloom::new(
+            ctx.wgsl_rs_runtime(),
+            &hdr_texture.read().expect("hdr_texture read"),
+        );
         let tonemapping = Tonemapping::new(
-            runtime,
+            ctx.wgsl_rs_runtime(),
             ctx.get_render_target().format().add_srgb_suffix(),
             &bloom.get_mix_texture(),
         );
@@ -1504,9 +1515,9 @@ impl Stage {
             sample_count,
             Some("stage-depth"),
         );
-        self.bloom.set_hdr_texture(self.runtime(), &hdr_texture);
-        self.tonemapping
-            .set_hdr_texture(self.device(), &hdr_texture);
+        self.bloom
+            .set_hdr_texture(self.wgsl_rs_runtime(), &hdr_texture);
+        self.tonemapping.set_hdr_texture(&hdr_texture);
         *self.hdr_texture.write().expect("hdr_texture write") = hdr_texture;
 
         let _ = self
@@ -1688,7 +1699,7 @@ impl Stage {
 
         // then render bloom
         if self.has_bloom.load(Ordering::Relaxed) {
-            self.bloom.bloom(self.device(), self.queue());
+            self.bloom.bloom(self.wgsl_rs_runtime());
         } else {
             // copy the input hdr texture to the bloom mix texture
             let mut encoder =
@@ -1720,7 +1731,7 @@ impl Stage {
         }
 
         // then render tonemapping
-        self.tonemapping.render(self.device(), self.queue(), view);
+        self.tonemapping.render(self.wgsl_rs_runtime(), view);
 
         // then render the debug overlay
         if self.has_debug_overlay.load(Ordering::Relaxed) {

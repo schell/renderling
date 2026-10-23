@@ -395,6 +395,14 @@ impl Context {
         }
     }
 
+    /// Temporary method to convert the internally stored Rust-GPU craballoc
+    /// WgpuRuntime into a wgsl-rs craballoc WgpuRuntime.
+    // TODO: Remove this after the wgsl-rs port is done.
+    pub(crate) fn wgsl_rs_runtime(&self) -> craballoc_wgsl::runtime::WgpuRuntime {
+        let WgpuRuntime { device, queue } = self.runtime.clone();
+        craballoc_wgsl::runtime::WgpuRuntime { device, queue }
+    }
+
     /// Attempts to create a new headless `Context` with the specified width,
     /// height, and backends.
     pub async fn try_new_headless(
