@@ -175,7 +175,7 @@ async fn manual_shadow_mapping() {
         .as_chunks::<4>()
         .0
         .iter()
-        .zip(with.chunks_exact(4))
+        .zip(with.as_chunks::<4>().0.iter())
         .filter(|(a, b)| a != b)
         .count();
     println!("pixels changed by shadow mapping: {changed}");

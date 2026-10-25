@@ -111,7 +111,7 @@ async fn manual_scene() {
         a.as_chunks::<4>()
             .0
             .iter()
-            .zip(b.chunks_exact(4))
+            .zip(b.as_chunks::<4>().0.iter())
             .filter(|(a, b)| a != b)
             .count()
     };
