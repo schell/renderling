@@ -1,12 +1,19 @@
 //! WGSL shader helpers.
 //!
 //! Constants, types and procedures.
+//!
+//! Entry points are kept in their own domain modules.
 
 #[wgsl_rs::wgsl]
 pub mod constants {
     //! Common constants.
 
     use wgsl_rs::std::*;
+
+    pub const INV_ATAN: Vec2f = Vec2f {
+        x: 0.1591,
+        y: 0.31830987,
+    };
 
     pub const TOP_LEFT_2D: Vec2f = vec2f(0.0, 0.0);
     pub const TOP_RIGHT_2D: Vec2f = vec2f(1.0, 0.0);
@@ -56,6 +63,15 @@ pub mod math {
     use super::constants::*;
     use wgsl_rs::std::*;
 
+    /// Return `0.0` if the length of the vector is very close to zero.
+    pub fn vec3_norm_or_zero(v: Vec3f) -> Vec3f {
+        if length(v) <= F32_EPSILON {
+            Vec3f::ZERO
+        } else {
+            normalize(v)
+        }
+    }
+
     pub fn triangle_face_normal(p1: Vec3f, p2: Vec3f, p3: Vec3f) -> Vec3f {
         let a = p1 - p2;
         let b = p1 - p3;
@@ -89,6 +105,24 @@ pub mod math {
             p4, p6, p5, p4, p7, p6, // bottom
             p2, p7, p1, p2, p6, p7, // back
         ]
+    }
+
+    /// Points on the unit cube that create a triangle-list mesh.
+    ///
+    /// Use [`unit_cube`] for a mesh that includes normals.
+    ///
+    /// `rust-gpu` doesn't like nested/double indexing so we do this here.
+    /// See [this comment on discord](https://discord.com/channels/750717012564770887/750717499737243679/1131395331368693770)
+    pub const fn cube() -> [Vec3f; 36] {
+        let p0 = vec3f(-0.5, 0.5, 0.5);
+        let p1 = vec3f(-0.5, 0.5, -0.5);
+        let p2 = vec3f(0.5, 0.5, -0.5);
+        let p3 = vec3f(0.5, 0.5, 0.5);
+        let p4 = vec3f(-0.5, -0.5, 0.5);
+        let p7 = vec3f(-0.5, -0.5, -0.5);
+        let p6 = vec3f(0.5, -0.5, -0.5);
+        let p5 = vec3f(0.5, -0.5, 0.5);
+        convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7])
     }
 
     /// Normalize a plane.
