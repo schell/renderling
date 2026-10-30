@@ -12,12 +12,18 @@ pub mod common {
 
     use wgsl_rs::std::*;
 
+    #[rustfmt::skip]
     use crate::shader::camera::*;
+
+    #[rustfmt::skip]
     use crate::shader::constants::*;
+
+    #[rustfmt::skip]
     use crate::shader::math::*;
 
-    /// Takes a unit direction and converts it to a uv lookup in an equirectangular
-    /// map.
+
+    /// Takes a unit direction and converts it to a uv lookup in an
+    /// equirectangular map.
     // TODO: determine if we need this function or if we can inline.
     pub fn direction_to_equirectangular_uv(dir: Vec3f) -> Vec2f {
         let mut uv = vec2f(atan2(dir.z, dir.x), asin(dir.y));
@@ -41,8 +47,8 @@ pub mod common {
     }
 
     impl SkyboxInterStage {
-        /// Used to create a cubemap from an equirectangular image as well as cubemap
-        /// convolutions.
+        /// Used to create a cubemap from an equirectangular image as well as
+        /// cubemap convolutions.
         pub fn from_unit_cube_vertex_index(vertex_index: u32, camera: CameraDescriptor) -> Self {
             let pos = cube()[vertex_index as usize];
             SkyboxInterStage {
@@ -61,8 +67,12 @@ pub mod render {
     use crabslab_wgsl::*;
     use wgsl_rs::std::*;
 
+    #[rustfmt::skip]
     use crate::shader::camera::*;
+
+    #[rustfmt::skip]
     use crate::shader::math::*;
+
 
     use super::common::*;
 
@@ -109,8 +119,12 @@ pub mod equirect_to_cubemap {
     use crabslab_wgsl::*;
     use wgsl_rs::std::*;
 
+    #[rustfmt::skip]
     use crate::shader::camera::*;
+
+    #[rustfmt::skip]
     use crate::shader::math::*;
+
 
     use super::common::*;
 
@@ -122,8 +136,8 @@ pub mod equirect_to_cubemap {
     ///
     /// Uses the `instance_index` as the [`Id`] for a [`CameraDescriptor`].
     ///
-    /// Used to create a cubemap from an equirectangular image as well as cubemap
-    /// convolutions.
+    /// Used to create a cubemap from an equirectangular image as well as
+    /// cubemap convolutions.
     #[vertex]
     pub fn vertex(input: SkyboxVertexInput) -> SkyboxInterStage {
         let camera: CameraDescriptor;
