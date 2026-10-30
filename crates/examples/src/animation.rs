@@ -1,5 +1,4 @@
 //! Animation examples: playback, skinning and morph targets.
-
 use crate::{cwd_to_manual_assets_dir, workspace_dir};
 
 #[tokio::test]
@@ -80,8 +79,10 @@ async fn manual_animation() {
 
     // The animation should have moved the triangle.
     let pixel_diff = |a: &[u8], b: &[u8]| {
-        a.chunks_exact(4)
-            .zip(b.chunks_exact(4))
+        a.as_chunks::<4>()
+            .0
+            .iter()
+            .zip(b.as_chunks::<4>().0.iter())
             .filter(|(a, b)| a != b)
             .count()
     };
@@ -182,8 +183,10 @@ async fn manual_morph_targets() {
     // ANCHOR_END: morph
 
     let pixel_diff = |a: &[u8], b: &[u8]| {
-        a.chunks_exact(4)
-            .zip(b.chunks_exact(4))
+        a.as_chunks::<4>()
+            .0
+            .iter()
+            .zip(b.as_chunks::<4>().0.iter())
             .filter(|(a, b)| a != b)
             .count()
     };

@@ -9,14 +9,8 @@ use std::sync::Arc;
 
 pub mod atlas_blit_fragment;
 pub mod atlas_blit_vertex;
-pub mod bloom_downsample_fragment;
-pub mod bloom_mix_fragment;
-pub mod bloom_upsample_fragment;
-pub mod bloom_vertex;
 pub mod brdf_lut_convolution_fragment;
 pub mod brdf_lut_convolution_vertex;
-pub mod compositor_fragment;
-pub mod compositor_vertex;
 pub mod compute_copy_depth_to_pyramid;
 pub mod compute_copy_depth_to_pyramid_multisampled;
 pub mod compute_culling;
@@ -43,8 +37,6 @@ pub mod skybox_cubemap_fragment;
 pub mod skybox_cubemap_vertex;
 pub mod skybox_equirectangular_fragment;
 pub mod skybox_vertex;
-pub mod tonemapping_fragment;
-pub mod tonemapping_vertex;
 
 // 2D/UI shaders
 pub mod ui_fragment;

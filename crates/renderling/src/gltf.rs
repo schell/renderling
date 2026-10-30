@@ -278,6 +278,7 @@ impl Material {
                     builder.set_emissive_tex_coord(emissive_tex.tex_coord());
                 }
             }
+            builder.set_emissive_factor(Vec3::from(material.emissive_factor()));
             builder.set_emissive_strength_multiplier(material.emissive_strength().unwrap_or(1.0));
         };
         Ok(builder)
@@ -1236,7 +1237,7 @@ where
     Ct: IsContainer<Pointer<u32> = Array<u32>>,
 {
     pub fn renderlets_iter(&self) -> impl Iterator<Item = &Primitive> {
-        self.primitives.iter().flat_map(|(_, rs)| rs.iter())
+        self.primitives.values().flat_map(|rs| rs.iter())
     }
 
     fn collect_nodes_recursive<'a>(&'a self, node_index: usize, nodes: &mut Vec<&'a GltfNode>) {

@@ -238,6 +238,8 @@ pub mod tutorial;
 pub mod types;
 pub mod ui_slab;
 
+pub mod shader;
+
 pub extern crate glam;
 
 // TODO: document the crate's feature flags here.

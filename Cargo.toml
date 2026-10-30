@@ -36,7 +36,7 @@ futures-util = "0.3.31"
 glam = { version = "0.30", default-features = false }
 gltf = { version = "1.4,1", features = ["KHR_lights_punctual", "KHR_materials_unlit", "KHR_materials_emissive_strength", "extras", "extensions"] }
 glyph_brush = "0.7.8"
-image = "0.25"
+image = { version = "0.25", features = ["exr"] }
 log = "0.4"
 loading-bytes = { path = "crates/loading-bytes", version = "0.1.1" }
 lyon = "1.0.1"
@@ -64,7 +64,12 @@ web-sys = "0.3"
 winit = { version = "0.30.12" }
 wgpu = { version = "30.0" }
 wgpu-core = { version = "30.0" }
+wgsl-rs = { git = "https://github.com/schell/wgsl-rs", branch = "feat-std-display-impls" }
+wgsl-rs-linkage-wgpu = { git = "https://github.com/schell/wgsl-rs", branch = "feat-std-display-impls" }
 metal = "0.32"
+
+crabslab_wgsl = { package = "crabslab", git = "https://github.com/schell/crabslab", branch = "feat-wgsl-rs-std-slabitem" }
+craballoc_wgsl = { package = "craballoc", git = "https://github.com/schell/crabslab", branch = "feat-wgsl-rs-std-slabitem" }
 
 [profile.dev]
 opt-level = 1

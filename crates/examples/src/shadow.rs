@@ -172,8 +172,10 @@ async fn manual_shadow_mapping() {
     let with = img_with_shadow.as_raw();
     assert_eq!(without.len(), with.len());
     let changed = without
-        .chunks_exact(4)
-        .zip(with.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(with.as_chunks::<4>().0.iter())
         .filter(|(a, b)| a != b)
         .count();
     println!("pixels changed by shadow mapping: {changed}");
