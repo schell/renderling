@@ -130,11 +130,6 @@
     "wgsl_entry_point": "primitiveshaderprimitive_vertex"
   },
   {
-    "entry_point": "skybox::shader::skybox_cubemap_fragment",
-    "source_path": "shaders/skybox-shader-skybox_cubemap_fragment.spv",
-    "wgsl_entry_point": "skyboxshaderskybox_cubemap_fragment"
-  },
-  {
     "entry_point": "skybox::shader::skybox_cubemap_vertex",
     "source_path": "shaders/skybox-shader-skybox_cubemap_vertex.spv",
     "wgsl_entry_point": "skyboxshaderskybox_cubemap_vertex"
@@ -143,11 +138,6 @@
     "entry_point": "skybox::shader::skybox_equirectangular_fragment",
     "source_path": "shaders/skybox-shader-skybox_equirectangular_fragment.spv",
     "wgsl_entry_point": "skyboxshaderskybox_equirectangular_fragment"
-  },
-  {
-    "entry_point": "skybox::shader::skybox_vertex",
-    "source_path": "shaders/skybox-shader-skybox_vertex.spv",
-    "wgsl_entry_point": "skyboxshaderskybox_vertex"
   },
   {
     "entry_point": "tutorial::implicit_isosceles_vertex",

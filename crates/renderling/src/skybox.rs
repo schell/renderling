@@ -108,7 +108,7 @@ pub mod render {
     pub fn fragment(input: SkyboxInterStage) -> Vec4f {
         let env_color: Vec3f =
             texture_sample(TEXTURE, SAMPLER, vec3_norm_or_zero(input.local_pos)).xyz();
-        vec4f(env_color.x, env_color.y, env_color.z, 1.0)
+        vec4f_from_3(env_color, 1.0)
     }
 }
 
@@ -129,8 +129,10 @@ pub mod equirect_to_cubemap {
     use super::common::*;
 
     storage!(group(0), binding(0), SLAB: RuntimeArray<u32>);
-    texture!(group(0), binding(1), TEXTURE: Texture2D<f32>);
-    sampler!(group(0), binding(2), SAMPLER: Sampler);
+    // The equirectangular source is Rgba32Float: structurally unfilterable in
+    // WebGPU, so both bindings must declare it.
+    texture!(group(0), binding(1), TEXTURE: Texture2D<f32>, unfilterable);
+    sampler!(group(0), binding(2), SAMPLER: Sampler, unfilterable);
 
     /// Vertex shader that draws a cubemap.
     ///
@@ -149,7 +151,9 @@ pub mod equirect_to_cubemap {
     #[fragment]
     pub fn fragment(input: SkyboxInterStage) -> Vec4f {
         let uv = direction_to_equirectangular_uv(vec3_norm_or_zero(input.local_pos));
-        let env_color = texture_sample(TEXTURE, SAMPLER, uv).rgb();
-        vec4f(env_color.x, env_color.y, env_color.z, 1.0)
+        // The equirectangular source is Rgba32Float: unfilterable in WebGPU,
+        // so sampling must use an explicit level (the source has one mip).
+        let env_color = texture_sample_level(TEXTURE, SAMPLER, uv, 0.0).rgb();
+        vec4f_from_3(env_color, 1.0)
     }
 }

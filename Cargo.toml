@@ -64,8 +64,8 @@ web-sys = "0.3"
 winit = { version = "0.30.12" }
 wgpu = { version = "30.0" }
 wgpu-core = { version = "30.0" }
-wgsl-rs = { git = "https://github.com/schell/wgsl-rs", branch = "feat-std-display-impls" }
-wgsl-rs-linkage-wgpu = { git = "https://github.com/schell/wgsl-rs", branch = "feat-std-display-impls" }
+wgsl-rs = { git = "https://github.com/schell/wgsl-rs", branch = "main" }
+wgsl-rs-linkage-wgpu = { git = "https://github.com/schell/wgsl-rs", branch = "main" }
 metal = "0.32"
 
 crabslab_wgsl = { package = "crabslab", git = "https://github.com/schell/crabslab", branch = "feat-wgsl-rs-std-slabitem" }

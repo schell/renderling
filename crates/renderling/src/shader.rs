@@ -4,6 +4,14 @@
 //!
 //! Entry points are kept in their own domain modules.
 
+use wgsl_rs::std::{vec4f, vec4f_from_3, Mat4f, Vec4f};
+
+use bvol::Frustum;
+use camera::CameraDescriptor;
+use math::normalize_plane;
+
+use crate::shader::math::intersect_planes;
+
 #[wgsl_rs::wgsl]
 pub mod constants {
     //! Common constants.
@@ -165,14 +173,14 @@ pub mod bvol {
     use wgsl_rs::std::*;
 
     /// Axis aligned bounding box.
-    #[derive(Clone, Copy, Debug, Default, PartialEq, SlabItem)]
+    #[derive(Clone, Copy, Debug, PartialEq, SlabItem)]
     pub struct Aabb {
         pub min: Vec3f,
         pub max: Vec3f,
     }
 
     /// Six planes of a view frustum.
-    #[derive(Clone, Copy, Default, PartialEq, SlabItem, core::fmt::Debug)]
+    #[derive(Clone, Copy, PartialEq, SlabItem, core::fmt::Debug)]
     pub struct Frustum {
         /// Planes constructing the sides of the frustum,
         /// each expressed as a normal vector (xyz) and the distance (w)
@@ -185,6 +193,28 @@ pub mod bvol {
     }
 
     impl Frustum {
+        pub const ZERO: Frustum = Frustum {
+            planes: [
+                Vec4f::ZERO,
+                Vec4f::ZERO,
+                Vec4f::ZERO,
+                Vec4f::ZERO,
+                Vec4f::ZERO,
+                Vec4f::ZERO,
+            ],
+            points: [
+                Vec3f::ZERO,
+                Vec3f::ZERO,
+                Vec3f::ZERO,
+                Vec3f::ZERO,
+                Vec3f::ZERO,
+                Vec3f::ZERO,
+                Vec3f::ZERO,
+                Vec3f::ZERO,
+            ],
+            center: Vec3f::ZERO,
+        };
+
         pub fn test_against_aabb(frustum: Frustum, aabb: Aabb) -> bool {
             for i in 0..3usize {
                 let mut out = 0u32;
@@ -218,6 +248,8 @@ pub mod bvol {
 
 #[wgsl_rs::wgsl(extensions = [crabslab_wgsl::SlabItemExt])]
 pub mod camera {
+    //! Camera primitives.
+
     use super::bvol::*;
     use crabslab_wgsl::*;
     use wgsl_rs::std::*;
@@ -227,19 +259,29 @@ pub mod camera {
     /// Used for transforming the stage during rendering.
     ///
     /// Use [`CameraDescriptor::new`] to create a new camera.
-    #[derive(Default, Clone, Copy, PartialEq, SlabItem, core::fmt::Debug)]
+    #[derive(Clone, Copy, PartialEq, SlabItem, core::fmt::Debug)]
     pub struct CameraDescriptor {
-        projection: Mat4f,
-        view: Mat4f,
-        position: Vec3f,
-        frustum: Frustum,
+        pub(crate) projection: Mat4f,
+        pub(crate) view: Mat4f,
+        pub(crate) position: Vec3f,
+        pub(crate) frustum: Frustum,
         /// Nearest center point on the frustum
-        z_near_point: Vec3f,
+        pub(crate) z_near_point: Vec3f,
         /// Furthest center point on the frustum
-        z_far_point: Vec3f,
+        pub(crate) z_far_point: Vec3f,
     }
 
     impl CameraDescriptor {
+        // TODO: ensure this is the correct identity
+        pub const IDENTITY: Self = CameraDescriptor {
+            projection: Mat4f::IDENTITY,
+            view: Mat4f::IDENTITY,
+            position: Vec3f::ZERO,
+            frustum: Frustum::ZERO,
+            z_near_point: Vec3f::ZERO,
+            z_far_point: Vec3f::ZERO,
+        };
+
         pub fn projection(cd: CameraDescriptor) -> Mat4f {
             cd.projection
         }
@@ -322,6 +364,141 @@ pub mod camera {
                 points: [nlt, nrt, nlb, nrb, flt, frt, flb, frb],
                 center: (nlt + nrt + nlb + nrb) / 4.0,
             }
+        }
+    }
+}
+
+impl CameraDescriptor {
+    /// Set the projection and view matrices for this camera.
+    ///
+    /// ## Note on depth ordering
+    /// The rendering pipeline uses `CompareFunction::Less` for depth testing.
+    /// This requires that the projection matrix maps closer objects to
+    /// *smaller* z_ndc values. For orthographic projections created with
+    /// `Mat4::orthographic_rh`, this means `near` must be less than `far`.
+    /// If `near > far`, the depth mapping is reversed and back faces will
+    /// be drawn over front faces, producing incorrect (typically black)
+    /// lighting output.
+    pub fn set_projection_and_view(&mut self, projection: Mat4f, view: Mat4f) {
+        // The z column of the projection matrix determines the depth mapping
+        // direction. A positive z coefficient (projection.z_axis.z > 0)
+        // indicates reversed depth (closer objects get larger z_ndc), which
+        // will cause incorrect results with the standard
+        // CompareFunction::Less depth test. This typically happens when
+        // `near > far` is passed to `Mat4::orthographic_rh`.
+        #[cfg(cpu)]
+        {
+            let z_coeff = projection[2u32].z;
+            if z_coeff > 0.0 {
+                log::warn!(
+                    "Projection matrix has a positive z coefficient ({z_coeff}), indicating \
+                     reversed depth mapping. This will cause incorrect depth testing (back faces \
+                     drawn over front faces) with the standard CompareFunction::Less. For \
+                     orthographic projections, ensure near < far."
+                );
+            }
+        }
+        self.projection = projection;
+        self.view = view;
+        let view_glam = glam::Mat4::from(view);
+        self.position = view_glam
+            .inverse()
+            .transform_point3(glam::Vec3::ZERO)
+            .into();
+        let inverse = (glam::Mat4::from(projection) * glam::Mat4::from(view)).inverse();
+        self.z_near_point = inverse.project_point3(glam::Vec3::ZERO).into();
+        self.z_far_point = inverse.project_point3(glam::Vec2::ZERO.extend(1.0)).into();
+        self.frustum = Frustum::from_camera(self);
+    }
+
+    pub fn with_projection_and_view(mut self, projection: Mat4f, view: Mat4f) -> Self {
+        self.set_projection_and_view(projection, view);
+        self
+    }
+
+    pub fn set_projection(&mut self, projection: Mat4f) {
+        self.set_projection_and_view(projection, self.view);
+    }
+
+    pub fn set_view(&mut self, view: Mat4f) {
+        self.set_projection_and_view(self.projection, view);
+    }
+
+    pub fn with_projection(mut self, projection: Mat4f) -> Self {
+        self.set_projection(projection);
+        self
+    }
+
+    pub fn with_view(mut self, view: Mat4f) -> Self {
+        self.set_view(view);
+        self
+    }
+}
+
+impl Frustum {
+    /// Compute a frustum in world space from the given [`CameraDescriptor`].
+    pub fn from_camera(camera: &CameraDescriptor) -> Self {
+        let viewprojection = CameraDescriptor::view_projection(*camera);
+        let mvp = [
+            Vec4f::to_array(viewprojection[0u32]),
+            Vec4f::to_array(viewprojection[1u32]),
+            Vec4f::to_array(viewprojection[2u32]),
+            Vec4f::to_array(viewprojection[3u32]),
+        ];
+
+        let left = normalize_plane(vec4f(
+            mvp[0][0] + mvp[0][3],
+            mvp[1][0] + mvp[1][3],
+            mvp[2][0] + mvp[2][3],
+            mvp[3][0] + mvp[3][3],
+        ));
+        let right = normalize_plane(vec4f(
+            -mvp[0][0] + mvp[0][3],
+            -mvp[1][0] + mvp[1][3],
+            -mvp[2][0] + mvp[2][3],
+            -mvp[3][0] + mvp[3][3],
+        ));
+        let bottom = normalize_plane(vec4f(
+            mvp[0][1] + mvp[0][3],
+            mvp[1][1] + mvp[1][3],
+            mvp[2][1] + mvp[2][3],
+            mvp[3][1] + mvp[3][3],
+        ));
+        let top = normalize_plane(vec4f(
+            -mvp[0][1] + mvp[0][3],
+            -mvp[1][1] + mvp[1][3],
+            -mvp[2][1] + mvp[2][3],
+            -mvp[3][1] + mvp[3][3],
+        ));
+        // For wgpu/Vulkan/D3D (z_ndc ∈ [0, 1]) the near plane is just row2,
+        // not row2 + row3 (which is the OpenGL z_ndc ∈ [-1, 1] convention).
+        let near = normalize_plane(vec4f(mvp[0][2], mvp[1][2], mvp[2][2], mvp[3][2]));
+        let far = normalize_plane(vec4f(
+            -mvp[0][2] + mvp[0][3],
+            -mvp[1][2] + mvp[1][3],
+            -mvp[2][2] + mvp[2][3],
+            -mvp[3][2] + mvp[3][3],
+        ));
+
+        // Account for the possibility that the projection is infinite.
+        //
+        // See <https://renderling.xyz/devlog/index.html#actual_frustum_culling>
+        // for more details.
+        let far = vec4f_from_3(-1.0 * near.xyz(), far.w);
+
+        let flt = intersect_planes(far, left, top);
+        let frt = intersect_planes(far, right, top);
+        let flb = intersect_planes(far, left, bottom);
+        let frb = intersect_planes(far, right, bottom);
+        let nlt = intersect_planes(near, left, top);
+        let nrt = intersect_planes(near, right, top);
+        let nlb = intersect_planes(near, left, bottom);
+        let nrb = intersect_planes(near, right, bottom);
+
+        Self {
+            center: (nlt + nrt + nlb + nrb) / 4.0,
+            planes: [near, left, right, bottom, top, far],
+            points: [nlt, nrt, nlb, nrb, flt, frt, flb, frb],
         }
     }
 }

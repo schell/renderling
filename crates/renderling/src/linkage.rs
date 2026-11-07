@@ -33,10 +33,8 @@ pub mod primitive_fragment;
 pub mod primitive_vertex;
 pub mod shadow_mapping_fragment;
 pub mod shadow_mapping_vertex;
-pub mod skybox_cubemap_fragment;
 pub mod skybox_cubemap_vertex;
 pub mod skybox_equirectangular_fragment;
-pub mod skybox_vertex;
 
 // 2D/UI shaders
 pub mod ui_fragment;

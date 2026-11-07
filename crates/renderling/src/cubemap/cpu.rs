@@ -266,7 +266,10 @@ impl EquirectangularImageToCubemapBlitter {
 
 #[cfg(test)]
 mod test {
-    use craballoc::slab::SlabAllocator;
+    use craballoc::{
+        runtime::WgpuRuntime,
+        slab::{SlabAllocator, SlabBuffer},
+    };
     use glam::Vec4;
     use image::GenericImageView;
 
@@ -323,9 +326,14 @@ mod test {
         );
         scene_cubemap.run(&stage);
 
-        let slab = SlabAllocator::new(&ctx, "cubemap-sampling-test", wgpu::BufferUsages::empty());
+        let runtime: &WgpuRuntime = ctx.as_ref();
+        let slab = SlabAllocator::new(
+            runtime,
+            "cubemap-sampling-test",
+            wgpu::BufferUsages::empty(),
+        );
         let uv = slab.new_value(Vec3::ZERO);
-        let buffer = slab.commit();
+        let buffer: SlabBuffer<wgpu::Buffer> = slab.commit();
         let label = Some("cubemap-sampling-test");
         let bind_group_layout =
             ctx.get_device()

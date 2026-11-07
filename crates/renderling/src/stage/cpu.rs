@@ -867,7 +867,11 @@ impl Stage {
             None
         } else {
             let skybox = guard.clone();
-            *guard = Skybox::empty(self.runtime());
+            let runtime = self.runtime();
+            *guard = Skybox::empty(craballoc_wgsl::runtime::WgpuRuntime {
+                device: runtime.device.clone(),
+                queue: runtime.queue.clone(),
+            });
             self.skybox_bindgroup
                 .lock()
                 .expect("skybox_bindgroup lock")
@@ -889,7 +893,14 @@ impl Stage {
         path: impl AsRef<std::path::Path>,
     ) -> Result<Skybox, AtlasImageError> {
         let hdr = AtlasImage::from_hdr_path(path)?;
-        Ok(Skybox::new(self.runtime(), hdr))
+        let runtime = self.runtime();
+        Ok(Skybox::new(
+            craballoc_wgsl::runtime::WgpuRuntime {
+                device: runtime.device.clone(),
+                queue: runtime.queue.clone(),
+            },
+            hdr,
+        ))
     }
 
     /// Returns a new [`Skybox`] using the bytes of an HDR image, if possible.
@@ -897,7 +908,14 @@ impl Stage {
     /// The returned [`Skybox`] must be **used** with [`Stage::use_skybox`].
     pub fn new_skybox_from_bytes(&self, bytes: &[u8]) -> Result<Skybox, AtlasImageError> {
         let hdr = AtlasImage::from_hdr_bytes(bytes)?;
-        Ok(Skybox::new(self.runtime(), hdr))
+        let runtime = self.runtime();
+        Ok(Skybox::new(
+            craballoc_wgsl::runtime::WgpuRuntime {
+                device: runtime.device.clone(),
+                queue: runtime.queue.clone(),
+            },
+            hdr,
+        ))
     }
 }
 
@@ -927,7 +945,13 @@ impl Stage {
             None
         } else {
             let ibl = guard.clone();
-            *guard = Ibl::new(self.runtime(), &Skybox::empty(self.runtime()));
+            *guard = Ibl::new(
+                self.runtime(),
+                &Skybox::empty(craballoc_wgsl::runtime::WgpuRuntime {
+                    device: self.runtime().device.clone(),
+                    queue: self.runtime().queue.clone(),
+                }),
+            );
             self.primitive_bind_group.invalidate();
             Some(ibl)
         }
@@ -1227,7 +1251,10 @@ impl Stage {
         let lighting = Lighting::new(stage_config.shadow_map_atlas_size, &geometry);
 
         let brdf_lut = BrdfLut::new(runtime);
-        let skybox = Skybox::empty(runtime);
+        let skybox = Skybox::empty(craballoc_wgsl::runtime::WgpuRuntime {
+            device: runtime.device.clone(),
+            queue: runtime.queue.clone(),
+        });
         let ibl = Ibl::new(runtime, &skybox);
 
         Self {
@@ -1753,7 +1780,10 @@ impl Stage {
 
 #[cfg(test)]
 mod test {
-    use craballoc::{runtime::CpuRuntime, slab::SlabAllocator};
+    use craballoc::{
+        runtime::{CpuRuntime, WgpuRuntime},
+        slab::SlabAllocator,
+    };
     use crabslab::{Array, Id, Slab};
     use glam::{Mat4, Vec2, Vec3, Vec4};
 
@@ -1897,7 +1927,7 @@ mod test {
     #[test]
     fn slabbed_vertices_native() {
         let ctx = Context::headless(100, 100).block();
-        let runtime = ctx.as_ref();
+        let runtime: &WgpuRuntime = ctx.as_ref();
 
         // Create our geometry on the slab.
         let slab = SlabAllocator::new(

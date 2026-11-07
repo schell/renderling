@@ -238,7 +238,7 @@ pub mod wgsl {
     };
     use crabslab_wgsl::Id;
     use wgsl_rs::std::{vec2f, vec2u, Vec2f, Vec2u};
-    use wgsl_rs_linkage_wgpu::{analysis::assemble_ir, IrModuleExt, WgpuLinkage};
+    use wgsl_rs_linkage_wgpu::{IrModuleExt, WgpuLinkage};
 
     use crate::texture::{self, Texture};
 
@@ -252,10 +252,9 @@ pub mod wgsl {
 
     impl BloomLinkage {
         pub fn new() -> Self {
-            let vertex_module = assemble_ir(&vertex::WGSL_SOURCE).expect("bloom vertex assembly");
-            let sample_module =
-                assemble_ir(&sample::WGSL_SOURCE).expect("bloom [up|down]sample assembly");
-            let mix_module = assemble_ir(&mix::WGSL_SOURCE).expect("bloom mix assembly");
+            let vertex_module = vertex::instantiate();
+            let sample_module = sample::instantiate();
+            let mix_module = mix::instantiate();
 
             BloomLinkage {
                 vertex: vertex_module.generate_linkage(),
@@ -492,8 +491,11 @@ pub mod wgsl {
                 mipmap_filter: wgpu::MipmapFilterMode::Linear,
                 ..Default::default()
             });
-        Texture::new_with_wgsl(
-            runtime,
+        Texture::new_with(
+            craballoc::runtime::WgpuRuntime {
+                device: runtime.as_ref().device.clone(),
+                queue: runtime.as_ref().queue.clone(),
+            },
             label,
             Some(
                 wgpu::TextureUsages::RENDER_ATTACHMENT
