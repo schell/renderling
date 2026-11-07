@@ -33,6 +33,16 @@ pub struct DiffCfg {
     /// Difference is measured as the magnitude of vector subtraction
     /// between the two pixels.
     pub pixel_threshold: f32,
+    /// The relative pixel threshold.
+    ///
+    /// Useful when comparing HDR pixels, where legitimate floating-point
+    /// differences scale with magnitude.
+    ///
+    /// A pixel is considered different when
+    /// `delta.length() > pixel_threshold + pixel_relative_threshold * max(|l|,
+    /// |r|, 1)` (delta and lengths measured on the premultiplied rgb). The
+    /// default `0.0` preserves the previous absolute-only behavior.
+    pub pixel_relative_threshold: f32,
     /// The percentage of "different" pixels (as determined using
     /// `pixel_threshold`) to "correct" pixels that the image must contain
     /// before it is considered an error.
@@ -47,6 +57,7 @@ impl Default for DiffCfg {
     fn default() -> Self {
         Self {
             pixel_threshold: PIXEL_MAGNITUDE_THRESHOLD,
+            pixel_relative_threshold: 0.0,
             image_threshold: IMAGE_DIFF_THRESHOLD,
             test_name: None,
             output_dir: test_output_dir(),
@@ -66,6 +77,7 @@ fn get_results(
     left_image: &Rgba32FImage,
     right_image: &Rgba32FImage,
     threshold: f32,
+    relative_threshold: f32,
 ) -> Result<Option<DiffResults>, ImgDiffError> {
     let lid @ (width, height) = left_image.dimensions();
     let rid = right_image.dimensions();
@@ -84,8 +96,9 @@ fn get_results(
                 let right_pixel = Vec4::from(right_pixel.0);
                 let right_pixel = (right_pixel * right_pixel.w).xyz();
                 let delta = (left_pixel - right_pixel).abs();
-                if delta.length() > threshold {
-                    Some((x, y, delta))
+                let scale = left_pixel.length().max(right_pixel.length()).max(1.0);
+                if delta.length() > threshold + relative_threshold * scale {
+                    Some((x, y, delta)) // counted as differing
                 } else {
                     None
                 }
@@ -133,8 +146,13 @@ pub fn save_to(
     let path = dir.as_ref().join(filename);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let img: DynamicImage = seen.into();
-    let img_buffer = img.into_rgba8();
-    let img = DynamicImage::from(img_buffer);
+    let img = if path.extension().and_then(|s| s.to_str()) == Some("exr") {
+        let img_buffer = img.into_rgba32f();
+        DynamicImage::from(img_buffer)
+    } else {
+        let img_buffer = img.into_rgba8();
+        DynamicImage::from(img_buffer)
+    };
     img.save(path).map_err(|e| e.to_string())
 }
 
@@ -153,11 +171,12 @@ pub fn assert_eq_cfg(
     let rhs = rhs.into().into_rgba32f();
     let DiffCfg {
         pixel_threshold,
+        pixel_relative_threshold,
         image_threshold,
         test_name,
         output_dir,
     } = cfg;
-    let results = match get_results(&lhs, &rhs, pixel_threshold) {
+    let results = match get_results(&lhs, &rhs, pixel_threshold, pixel_relative_threshold) {
         Ok(maybe_diff) => maybe_diff,
         Err(e) => return Err(format!("Asserting {filename} failed: {e}")),
     };
@@ -169,7 +188,10 @@ pub fn assert_eq_cfg(
         avg_delta_length,
     }) = results
     {
-        println!("{filename} has {diffs} pixel differences (threshold={pixel_threshold})");
+        println!(
+            "{filename} has {diffs} pixel differences (threshold={pixel_threshold} \
+             relative_threshold={pixel_relative_threshold})"
+        );
         println!("  max_delta_length: {max_delta_length}");
         println!(
             "  avg_delta_length: {avg_delta_length} (average of deltas of pixels past the \
@@ -270,5 +292,80 @@ mod test {
     fn can_compare_images_sanity() {
         let img = image::open("../../test_img/jolt.png").unwrap();
         assert_img_eq("jolt.png", img);
+    }
+}
+
+
+#[cfg(test)]
+mod relative_threshold_test {
+    use crate::{assert_eq_cfg, DiffCfg};
+
+    fn img_of(values: &[[f32; 4]]) -> image::Rgba32FImage {
+        let mut img = image::Rgba32FImage::new(1, values.len() as u32);
+        for (i, v) in values.iter().enumerate() {
+            img.put_pixel(0, i as u32, image::Rgba(*v));
+        }
+        img
+    }
+
+    fn cfg(pixel_threshold: f32, relative: f32, output_dir: &str) -> DiffCfg {
+        DiffCfg {
+            pixel_threshold,
+            pixel_relative_threshold: relative,
+            image_threshold: 0.0,
+            test_name: Some("relative_threshold_boundary"),
+            output_dir: std::path::PathBuf::from(output_dir),
+        }
+    }
+
+    /// Deltas are allowed up to
+    /// `pixel_threshold + pixel_relative_threshold * pixel_magnitude`.
+    ///
+    /// Asserts the exact boundary in both directions for the absolute-only
+    /// default and the relative mode.
+    #[test]
+    fn relative_threshold_boundary() {
+        let base = [0.0, 0.0, 100.0, 1.0];
+        let out = std::env::temp_dir()
+            .join("img-diff-relative-threshold-out")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        // Default (absolute-only): 0.05 within the threshold, no diffs.
+        let r = assert_eq_cfg(
+            "relative-threshold-t0",
+            img_of(&[base]),
+            img_of(&[[0.0, 0.0, 100.05, 1.0]]),
+            cfg(0.1, 0.0, &out),
+        );
+        assert!(r.is_ok(), "t0 should pass: {r:?}");
+
+        // Default (absolute-only): 0.2 is past 0.1 -> one differing pixel.
+        let r = assert_eq_cfg(
+            "relative-threshold-t1",
+            img_of(&[base]),
+            img_of(&[[0.0, 0.0, 100.2, 1.0]]),
+            cfg(0.1, 0.0, &out),
+        );
+        assert!(r.is_err(), "t1 should fail: {r:?}");
+
+        // Relative: 2.0 is within 0.1 + 0.05 * 100 = 5.1, no diffs.
+        let r = assert_eq_cfg(
+            "relative-threshold-t2",
+            img_of(&[base]),
+            img_of(&[[0.0, 0.0, 102.0, 1.0]]),
+            cfg(0.1, 0.05, &out),
+        );
+        assert!(r.is_ok(), "t2 should pass: {r:?}");
+
+        // Relative: 10.0 is past 5.1 -> one differing pixel.
+        let r = assert_eq_cfg(
+            "relative-threshold-t3",
+            img_of(&[base]),
+            img_of(&[[0.0, 0.0, 110.0, 1.0]]),
+            cfg(0.1, 0.05, &out),
+        );
+        assert!(r.is_err(), "t3 should fail: {r:?}");
     }
 }

@@ -343,6 +343,9 @@ pub(crate) struct GlobalStageConfig {
 /// ```
 pub struct Context {
     runtime: WgpuRuntime,
+    // NOTE: This is the same runtime, repackaged
+    // TODO: This should become `runtime` after the wgsl-rs port is done
+    wgsl_runtime: craballoc_wgsl::runtime::WgpuRuntime,
     adapter: Arc<wgpu::Adapter>,
     render_target: RenderTarget,
     pub(crate) stage_config: Arc<RwLock<GlobalStageConfig>>,
@@ -351,6 +354,12 @@ pub struct Context {
 impl AsRef<WgpuRuntime> for Context {
     fn as_ref(&self) -> &WgpuRuntime {
         &self.runtime
+    }
+}
+
+impl AsRef<craballoc_wgsl::runtime::WgpuRuntime> for Context {
+    fn as_ref(&self) -> &craballoc_wgsl::runtime::WgpuRuntime {
+        &self.wgsl_runtime
     }
 }
 
@@ -384,15 +393,28 @@ impl Context {
             },
             use_compute_culling: false,
         }));
+        let runtime = WgpuRuntime {
+            device: device.into(),
+            queue: queue.into(),
+        };
         Self {
             adapter,
-            runtime: WgpuRuntime {
-                device: device.into(),
-                queue: queue.into(),
+            wgsl_runtime: craballoc_wgsl::runtime::WgpuRuntime {
+                device: runtime.device.clone(),
+                queue: runtime.queue.clone(),
             },
+            runtime,
             render_target: target,
             stage_config,
         }
+    }
+
+    /// Temporary method to convert the internally stored Rust-GPU craballoc
+    /// WgpuRuntime into a wgsl-rs craballoc WgpuRuntime.
+    // TODO: Remove this after the wgsl-rs port is done.
+    pub(crate) fn wgsl_rs_runtime(&self) -> craballoc_wgsl::runtime::WgpuRuntime {
+        let WgpuRuntime { device, queue } = self.runtime.clone();
+        craballoc_wgsl::runtime::WgpuRuntime { device, queue }
     }
 
     /// Attempts to create a new headless `Context` with the specified width,

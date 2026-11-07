@@ -14,7 +14,7 @@ use crate::gltf::GltfDocument;
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
     bindgroup::ManagedBindGroup,
-    bloom::Bloom,
+    bloom::wgsl::Bloom,
     camera::{shader::CameraDescriptor, Camera},
     debug::DebugOverlay,
     draw::DrawCalls,
@@ -31,7 +31,7 @@ use crate::{
     primitive::Primitive,
     skybox::{Skybox, SkyboxRenderPipeline},
     texture::{DepthTexture, Texture},
-    tonemapping::Tonemapping,
+    tonemapping::wgsl::Tonemapping,
     transform::{NestedTransform, Transform},
 };
 
@@ -414,8 +414,8 @@ pub struct Stage {
     pub(crate) clear_depth_attachments: Arc<AtomicBool>,
 
     pub(crate) bloom: Bloom,
-
     pub(crate) tonemapping: Tonemapping,
+
     pub(crate) debug_overlay: DebugOverlay,
     pub(crate) background_color: Arc<RwLock<wgpu::Color>>,
 
@@ -867,7 +867,11 @@ impl Stage {
             None
         } else {
             let skybox = guard.clone();
-            *guard = Skybox::empty(self.runtime());
+            let runtime = self.runtime();
+            *guard = Skybox::empty(craballoc_wgsl::runtime::WgpuRuntime {
+                device: runtime.device.clone(),
+                queue: runtime.queue.clone(),
+            });
             self.skybox_bindgroup
                 .lock()
                 .expect("skybox_bindgroup lock")
@@ -889,7 +893,14 @@ impl Stage {
         path: impl AsRef<std::path::Path>,
     ) -> Result<Skybox, AtlasImageError> {
         let hdr = AtlasImage::from_hdr_path(path)?;
-        Ok(Skybox::new(self.runtime(), hdr))
+        let runtime = self.runtime();
+        Ok(Skybox::new(
+            craballoc_wgsl::runtime::WgpuRuntime {
+                device: runtime.device.clone(),
+                queue: runtime.queue.clone(),
+            },
+            hdr,
+        ))
     }
 
     /// Returns a new [`Skybox`] using the bytes of an HDR image, if possible.
@@ -897,7 +908,14 @@ impl Stage {
     /// The returned [`Skybox`] must be **used** with [`Stage::use_skybox`].
     pub fn new_skybox_from_bytes(&self, bytes: &[u8]) -> Result<Skybox, AtlasImageError> {
         let hdr = AtlasImage::from_hdr_bytes(bytes)?;
-        Ok(Skybox::new(self.runtime(), hdr))
+        let runtime = self.runtime();
+        Ok(Skybox::new(
+            craballoc_wgsl::runtime::WgpuRuntime {
+                device: runtime.device.clone(),
+                queue: runtime.queue.clone(),
+            },
+            hdr,
+        ))
     }
 }
 
@@ -927,7 +945,13 @@ impl Stage {
             None
         } else {
             let ibl = guard.clone();
-            *guard = Ibl::new(self.runtime(), &Skybox::empty(self.runtime()));
+            *guard = Ibl::new(
+                self.runtime(),
+                &Skybox::empty(craballoc_wgsl::runtime::WgpuRuntime {
+                    device: self.runtime().device.clone(),
+                    queue: self.runtime().queue.clone(),
+                }),
+            );
             self.primitive_bind_group.invalidate();
             Some(ibl)
         }
@@ -938,6 +962,14 @@ impl Stage {
     /// Returns the runtime.
     pub fn runtime(&self) -> &WgpuRuntime {
         self.as_ref()
+    }
+
+    /// Temporary method to convert the internally stored Rust-GPU craballoc
+    /// WgpuRuntime into a wgsl-rs craballoc WgpuRuntime.
+    // TODO: Remove this after the wgsl-rs port is done.
+    pub(crate) fn wgsl_rs_runtime(&self) -> craballoc_wgsl::runtime::WgpuRuntime {
+        let WgpuRuntime { device, queue } = self.runtime().clone();
+        craballoc_wgsl::runtime::WgpuRuntime { device, queue }
     }
 
     pub fn device(&self) -> &wgpu::Device {
@@ -966,8 +998,8 @@ impl Stage {
         let num_u32s = self.geometry.slab_allocator().len()
             + self.lighting.slab_allocator().len()
             + self.materials.slab_allocator().len()
-            + self.bloom.slab_allocator().len()
-            + self.tonemapping.slab_allocator().len()
+            + self.bloom.arena().capacity() as usize
+            + self.tonemapping.arena().length() as usize
             + self
                 .draw_calls
                 .read()
@@ -1201,9 +1233,12 @@ impl Stage {
         let msaa_render_target = Default::default();
         // UNWRAP: safe because no other references at this point (created
         // above^)
-        let bloom = Bloom::new(ctx, &hdr_texture.read().expect("hdr_texture read"));
+        let bloom = Bloom::new(
+            ctx.wgsl_rs_runtime(),
+            &hdr_texture.read().expect("hdr_texture read"),
+        );
         let tonemapping = Tonemapping::new(
-            runtime,
+            ctx.wgsl_rs_runtime(),
             ctx.get_render_target().format().add_srgb_suffix(),
             &bloom.get_mix_texture(),
         );
@@ -1216,7 +1251,10 @@ impl Stage {
         let lighting = Lighting::new(stage_config.shadow_map_atlas_size, &geometry);
 
         let brdf_lut = BrdfLut::new(runtime);
-        let skybox = Skybox::empty(runtime);
+        let skybox = Skybox::empty(craballoc_wgsl::runtime::WgpuRuntime {
+            device: runtime.device.clone(),
+            queue: runtime.queue.clone(),
+        });
         let ibl = Ibl::new(runtime, &skybox);
 
         Self {
@@ -1504,9 +1542,9 @@ impl Stage {
             sample_count,
             Some("stage-depth"),
         );
-        self.bloom.set_hdr_texture(self.runtime(), &hdr_texture);
-        self.tonemapping
-            .set_hdr_texture(self.device(), &hdr_texture);
+        self.bloom
+            .set_hdr_texture(self.wgsl_rs_runtime(), &hdr_texture);
+        self.tonemapping.set_hdr_texture(&hdr_texture);
         *self.hdr_texture.write().expect("hdr_texture write") = hdr_texture;
 
         let _ = self
@@ -1688,7 +1726,7 @@ impl Stage {
 
         // then render bloom
         if self.has_bloom.load(Ordering::Relaxed) {
-            self.bloom.bloom(self.device(), self.queue());
+            self.bloom.bloom(self.wgsl_rs_runtime());
         } else {
             // copy the input hdr texture to the bloom mix texture
             let mut encoder =
@@ -1720,7 +1758,7 @@ impl Stage {
         }
 
         // then render tonemapping
-        self.tonemapping.render(self.device(), self.queue(), view);
+        self.tonemapping.render(self.wgsl_rs_runtime(), view);
 
         // then render the debug overlay
         if self.has_debug_overlay.load(Ordering::Relaxed) {
@@ -1742,7 +1780,10 @@ impl Stage {
 
 #[cfg(test)]
 mod test {
-    use craballoc::{runtime::CpuRuntime, slab::SlabAllocator};
+    use craballoc::{
+        runtime::{CpuRuntime, WgpuRuntime},
+        slab::SlabAllocator,
+    };
     use crabslab::{Array, Id, Slab};
     use glam::{Mat4, Vec2, Vec3, Vec4};
 
@@ -1886,7 +1927,7 @@ mod test {
     #[test]
     fn slabbed_vertices_native() {
         let ctx = Context::headless(100, 100).block();
-        let runtime = ctx.as_ref();
+        let runtime: &WgpuRuntime = ctx.as_ref();
 
         // Create our geometry on the slab.
         let slab = SlabAllocator::new(

@@ -130,10 +130,11 @@ mod test {
             .collect();
         assert_eq!(512 * 512 * 2, pixels.len());
         let pixels: Vec<f32> = pixels
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .flat_map(|pixel| match pixel {
                 [r, g] => [*r, *g, 0.0, 1.0],
-                _ => unreachable!(),
             })
             .collect();
 

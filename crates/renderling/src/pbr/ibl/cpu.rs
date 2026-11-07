@@ -142,7 +142,9 @@ fn create_irradiance_map(
         "diffuse-irradiance",
         &pipeline.0,
         buffer_upkeep,
-        camera,
+        |mat| {
+            camera.set_view(*mat);
+        },
         &bindgroup,
         views,
         32,

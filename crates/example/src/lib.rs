@@ -223,7 +223,13 @@ impl App {
     pub fn load_hdr_skybox(&mut self, bytes: Vec<u8>) {
         log::info!("loading skybox");
         let img = AtlasImage::from_hdr_bytes(&bytes).unwrap();
-        let skybox = Skybox::new(self.stage.runtime(), img);
+        let skybox = Skybox::new(
+            craballoc_wgsl::runtime::WgpuRuntime {
+                device: self.stage.runtime().device.clone(),
+                queue: self.stage.runtime().queue.clone(),
+            },
+            img,
+        );
         self.skybox_image_bytes = Some(bytes);
         self.stage.use_skybox(&skybox);
         let ibl = self.stage.new_ibl(&skybox);

@@ -14,10 +14,7 @@ use image::{
 use mips::MipMapGenerator;
 use snafu::prelude::*;
 
-use crate::{
-    atlas::{AtlasImage, AtlasImageFormat},
-    camera::Camera,
-};
+use crate::atlas::{AtlasImage, AtlasImageFormat};
 
 pub mod mips;
 
@@ -724,7 +721,8 @@ impl Texture {
         label: &str,
         pipeline: &wgpu::RenderPipeline,
         mut buffer_upkeep: impl FnMut(),
-        camera: &Camera,
+        // TODO: remove this after wgsl-rs port is done in favor of passing `&Camera`
+        mut with_view: impl FnMut(&Mat4),
         bindgroup: &wgpu::BindGroup,
         views: [Mat4; 6],
         texture_size: u32,
@@ -762,7 +760,7 @@ impl Texture {
             );
 
             // update the view to point at one of the cube faces
-            camera.set_view(*view);
+            with_view(view);
             buffer_upkeep();
 
             {
@@ -1255,6 +1253,75 @@ impl CopiedTextureBuffer {
             0,
             None,
         ))
+    }
+}
+
+#[cfg(test)]
+impl Texture {
+    /// Test-support readback of one array/cube layer of this texture at mip
+    /// 0, as f32 rgba pixels (this crate's HDR format is rgba16float). The
+    /// wgsl A/B tests read cubemap faces per layer.
+    pub(crate) async fn read_hdr_layer_image(
+        &self,
+        runtime: impl AsRef<WgpuRuntime>,
+        layer: u32,
+    ) -> Result<Rgba32FImage, TextureError> {
+        let runtime = runtime.as_ref();
+        let width = self.width();
+        let height = self.height();
+        let copied = CopiedTextureBuffer::read_from(
+            runtime,
+            &self.texture,
+            width as usize,
+            height as usize,
+            4,
+            2,
+            0,
+            Some(wgpu::Origin3d {
+                x: 0,
+                y: 0,
+                z: layer,
+            }),
+        );
+        let pixels = copied.pixels(&runtime.device).await?;
+        let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
+            .iter()
+            .map(|p| half::f16::from_bits(*p).to_f32())
+            .collect::<Vec<_>>();
+        assert_eq!((width * height * 4) as usize, pixels.len());
+        let img: image::Rgba32FImage = image::ImageBuffer::from_vec(width, height, pixels)
+            .context(CouldNotCreateImageBufferSnafu)?;
+        Ok(img)
+    }
+
+    /// Test-support readback of a `Depth32Float` attachment as f32 values in
+    /// row-major order, returning `(width, height, values)`.
+    pub(crate) async fn read_depth_values(
+        runtime: impl AsRef<WgpuRuntime>,
+        texture: &wgpu::Texture,
+    ) -> Result<(u32, u32, Vec<f32>), TextureError> {
+        let runtime = runtime.as_ref();
+        assert_eq!(
+            wgpu::TextureFormat::Depth32Float,
+            texture.format(),
+            "read_depth_values: only Depth32Float is supported"
+        );
+        let width = texture.width();
+        let height = texture.height();
+        let copied = CopiedTextureBuffer::read_from(
+            runtime,
+            texture,
+            width as usize,
+            height as usize,
+            1,
+            4,
+            0,
+            None,
+        );
+        let pixels = copied.pixels(&runtime.device).await?;
+        let values = bytemuck::cast_slice::<u8, f32>(&pixels).to_vec();
+        assert_eq!((width * height) as usize, values.len());
+        Ok((width, height, values))
     }
 }
 

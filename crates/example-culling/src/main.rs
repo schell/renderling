@@ -14,7 +14,6 @@ use renderling::{
     math::hex_to_vec4,
     primitive::Primitive,
     stage::Stage,
-    tonemapping::srgba_to_linear,
 };
 use winit::{
     application::ApplicationHandler,
@@ -216,9 +215,12 @@ impl TestAppHandler for CullingExample {
         let frustum = frustum_camera.0.frustum();
         log::info!("frustum.planes: {:#?}", frustum.planes);
 
-        let blue_color = srgba_to_linear(hex_to_vec4(0x7EACB5FF));
-        let red_color = srgba_to_linear(hex_to_vec4(0xC96868FF));
-        let yellow_color = srgba_to_linear(hex_to_vec4(0xFADFA1FF));
+        // Convert sRGB hex colors to linear space for the material's
+        // albedo factor (same pow(2.2) approximation the shader uses).
+        let to_linear = |v: Vec4| v.truncate().powf(2.2).extend(v.w);
+        let blue_color = to_linear(hex_to_vec4(0x7EACB5FF));
+        let red_color = to_linear(hex_to_vec4(0xC96868FF));
+        let yellow_color = to_linear(hex_to_vec4(0xFADFA1FF));
 
         let material_aabb_overlapping = stage.new_material().with_albedo_factor(blue_color);
         let material_aabb_outside = stage.new_material().with_albedo_factor(red_color);

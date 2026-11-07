@@ -187,13 +187,14 @@ impl Aabb {
 
         let positions = crate::math::convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]);
         positions
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|chunk| match chunk {
                 [a, b, c] => {
                     let n = crate::math::triangle_face_normal(*a, *b, *c);
                     [(*a, n), (*b, n), (*c, n)]
                 }
-                _ => unreachable!(),
             })
             .collect()
     }
@@ -299,13 +300,14 @@ impl Frustum {
         let p6 = frb;
         let p7 = flb;
         crate::math::convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7])
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|chunk| match chunk {
                 [a, b, c] => {
                     let n = crate::math::triangle_face_normal(*a, *b, *c);
                     [(*a, n), (*b, n), (*c, n)]
                 }
-                _ => unreachable!(),
             })
             .collect()
     }
@@ -404,13 +406,14 @@ impl BoundingBox {
 
         // Attach per-triangle face normals.
         let vertices: Vec<(Vec3, Vec3)> = positions
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|chunk| match chunk {
                 [a, b, c] => {
                     let n = crate::math::triangle_face_normal(*a, *b, *c);
                     [(*a, n), (*b, n), (*c, n)]
                 }
-                _ => unreachable!(),
             })
             .collect();
 
@@ -747,7 +750,7 @@ mod test {
             let frame = ctx.get_next_frame().unwrap();
             stage.render(&frame.view());
             let img = frame.read_image().block().unwrap();
-            img_diff::save(&format!("bvol/ortho_lighting_{label}.png"), img.clone());
+            img_diff::save(format!("bvol/ortho_lighting_{label}.png"), img.clone());
             let bright = img
                 .pixels()
                 .filter(|p| p.0[0] > 10 || p.0[1] > 10 || p.0[2] > 10)

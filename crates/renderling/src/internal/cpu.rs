@@ -88,12 +88,12 @@ pub fn new_instance(backends: Option<wgpu::Backends>) -> wgpu::Instance {
     );
     // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
     let backends = backends.unwrap_or(wgpu::Backends::PRIMARY);
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+
+
+    wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends,
         ..wgpu::InstanceDescriptor::new_without_display_handle()
-    });
-
-    instance
+    })
 }
 
 /// Create a new suite of `wgpu` machinery using a window or canvas.
