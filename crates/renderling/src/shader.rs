@@ -15,8 +15,12 @@ use crate::shader::math::intersect_planes;
 #[wgsl_rs::wgsl]
 pub mod constants {
     //! Common constants.
+    #![allow(clippy::approx_constant)]
 
     use wgsl_rs::std::*;
+
+    pub const PI: f32 = 3.1415927;
+    pub const FRAC_1_PI: f32 = 0.31830987;
 
     pub const INV_ATAN: Vec2f = Vec2f {
         x: 0.1591,
@@ -70,6 +74,11 @@ pub mod math {
     //! Common math procedures.
     use super::constants::*;
     use wgsl_rs::std::*;
+
+    /// Returns `true` when the input is LTE F32_EPSILON.
+    pub fn is_zero(input: f32) -> bool {
+        input <= F32_EPSILON
+    }
 
     /// Return `0.0` if the length of the vector is very close to zero.
     pub fn vec3_norm_or_zero(v: Vec3f) -> Vec3f {
