@@ -21,6 +21,7 @@ pub mod constants {
 
     pub const PI: f32 = 3.1415927;
     pub const FRAC_1_PI: f32 = 0.31830987;
+    pub const FRAC_PI_2: f32 = 1.5707964;
 
     pub const INV_ATAN: Vec2f = Vec2f {
         x: 0.1591,
