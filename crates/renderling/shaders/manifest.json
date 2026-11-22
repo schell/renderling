@@ -20,16 +20,6 @@
     "wgsl_entry_point": "convolutionshaderbrdf_lut_convolution_vertex"
   },
   {
-    "entry_point": "convolution::shader::generate_mipmap_fragment",
-    "source_path": "shaders/convolution-shader-generate_mipmap_fragment.spv",
-    "wgsl_entry_point": "convolutionshadergenerate_mipmap_fragment"
-  },
-  {
-    "entry_point": "convolution::shader::generate_mipmap_vertex",
-    "source_path": "shaders/convolution-shader-generate_mipmap_vertex.spv",
-    "wgsl_entry_point": "convolutionshadergenerate_mipmap_vertex"
-  },
-  {
     "entry_point": "convolution::shader::prefilter_environment_cubemap_fragment",
     "source_path": "shaders/convolution-shader-prefilter_environment_cubemap_fragment.spv",
     "wgsl_entry_point": "convolutionshaderprefilter_environment_cubemap_fragment"

@@ -3,6 +3,7 @@
 use crate::texture::Texture;
 use craballoc::runtime::WgpuRuntime;
 use snafu::Snafu;
+use wgsl_rs_linkage_wgpu::{IrModuleExt, WgpuLinkage};
 
 use super::wgpu_texture_format_channels_and_subpixel_bytes_todo;
 
@@ -17,84 +18,52 @@ pub enum MipMapError {
     },
 }
 
-fn create_pipeline(
-    device: &wgpu::Device,
-    format: wgpu::TextureFormat,
-    pp_layout: &wgpu::PipelineLayout,
-) -> wgpu::RenderPipeline {
-    let vertex_linkage = crate::linkage::generate_mipmap_vertex::linkage(device);
-    let fragment_linkage = crate::linkage::generate_mipmap_fragment::linkage(device);
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        multiview_mask: None,
-        label: LABEL,
-        layout: Some(pp_layout),
-        vertex: wgpu::VertexState {
-            module: &vertex_linkage.module,
-            entry_point: Some(vertex_linkage.entry_point),
-            buffers: &[],
-            compilation_options: Default::default(),
-        },
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            front_face: wgpu::FrontFace::Cw,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            ..Default::default()
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &fragment_linkage.module,
-            entry_point: Some(fragment_linkage.entry_point),
-            targets: &[Some(wgpu::ColorTargetState {
-                format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::all(),
-            })],
-            compilation_options: Default::default(),
-        }),
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        cache: None,
-    })
-}
-
 pub struct MipMapGenerator {
     format: wgpu::TextureFormat,
     pipeline: wgpu::RenderPipeline,
-    bindgroup_layout: wgpu::BindGroupLayout,
+    linkage: WgpuLinkage,
 }
 
 impl MipMapGenerator {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        let bg_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: LABEL,
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
+        let mut linkage = crate::convolution::mipmap::instantiate().generate_linkage();
+        let pp_layout = linkage.pipeline_layout(device, LABEL);
+        let pipeline = {
+            let module = linkage.shader_module(device);
+            let vertex = linkage
+                .vertex_entry("generate_mipmap_vertex")
+                .expect("mipmap vertex")
+                .vertex_state(&module);
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                multiview_mask: None,
+                label: LABEL,
+                layout: Some(&pp_layout),
+                vertex,
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Cw,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    ..Default::default()
                 },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-        let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: LABEL,
-            bind_group_layouts: &[Some(&bg_layout)],
-            immediate_size: 0,
-        });
-        let pipeline = create_pipeline(device, format, &pp_layout);
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("generate_mipmap_fragment"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::all(),
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                cache: None,
+            })
+        };
         Self {
             format,
             pipeline,
-            bindgroup_layout: bg_layout,
+            linkage,
         }
     }
 
@@ -103,7 +72,7 @@ impl MipMapGenerator {
     /// # Errs
     /// Errors if the texture's format doesn't match the generator format.
     pub fn generate(
-        &self,
+        &mut self,
         runtime: impl AsRef<WgpuRuntime>,
         texture: &Texture,
         mip_levels: u32,
@@ -148,23 +117,23 @@ impl MipMapGenerator {
             } else {
                 &mips[(mip_level - 2) as usize]
             };
-            let bindgroup = runtime
-                .as_ref()
-                .device
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: LABEL,
-                    layout: &self.bindgroup_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&prev_texture.view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&prev_texture.sampler),
-                        },
+            let bindgroup = self
+                .linkage
+                .create_bind_group_named(
+                    0,
+                    &runtime.as_ref().device,
+                    &[
+                        (
+                            "TEXTURE",
+                            wgpu::BindingResource::TextureView(&prev_texture.view),
+                        ),
+                        (
+                            "SAMPLER",
+                            wgpu::BindingResource::Sampler(&prev_texture.sampler),
+                        ),
                     ],
-                });
+                )
+                .expect("mipmap bindgroup");
 
             let mut encoder = runtime
                 .as_ref()

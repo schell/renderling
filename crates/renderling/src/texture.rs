@@ -661,9 +661,10 @@ impl Texture {
         mip_levels: u32,
     ) -> Vec<Self> {
         let runtime = runtime.as_ref();
-        let generator = MipMapGenerator::new(&runtime.device, self.texture.format());
-        // UNWRAP: safe because we know the formats match.
-        generator.generate(runtime, self, mip_levels).unwrap()
+        let mut generator = MipMapGenerator::new(&runtime.device, self.texture.format());
+        generator
+            .generate(runtime, self, mip_levels)
+            .expect("safe because we know the formats match")
     }
 
     pub const HDR_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
