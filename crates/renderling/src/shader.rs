@@ -504,6 +504,242 @@ impl Frustum {
     }
 }
 
+#[wgsl_rs::wgsl(extensions = [crabslab_wgsl::SlabItemExt])]
+pub mod atlas {
+    //! Image atlas shader bits.
+
+    use crabslab_wgsl::*;
+    use wgsl_rs::std::{select, *};
+
+    use crate::shader::constants::{CLIP_SPACE_COORD_QUAD_CCW, UV_COORD_QUAD_CCW};
+
+    /// Describes various qualities of the atlas, to be used on the GPU.
+    #[derive(Clone, Copy, core::fmt::Debug, Default, PartialEq, SlabItem)]
+    pub struct AtlasDescriptor {
+        pub size: Vec3u,
+    }
+
+    /// How edges should be handled in texture addressing/wrapping.
+    #[repr(u32)]
+    #[derive(
+        Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, SlabItem, core::fmt::Debug,
+    )]
+    pub enum TextureAddressMode {
+        #[default]
+        ClampToEdge,
+        Repeat,
+        MirroredRepeat,
+    }
+
+    impl TextureAddressMode {
+        /// Infinitely wrap the input between 0.0 and 1.0.
+        ///
+        /// Only handles `input` >= 0.0.
+        pub fn repeat(input: f32) -> f32 {
+            let mut input = input;
+            let gto = input >= 1.0;
+            input %= 1.0;
+            if gto && input == 0.0 {
+                1.0
+            } else {
+                input
+            }
+        }
+
+        /// Wrap the given s/t coord into a pixel index according to texture
+        /// addressing.
+        pub fn wrap(tam: Self, input: f32) -> f32 {
+            let sign = select(-1.0f32, 1.0f32, input >= 0.0);
+            let mut output = clamp(input, 0.0, 1.0);
+            #[wgsl_allow(non_literal_match_statement_patterns)]
+            match tam {
+                TextureAddressMode::Repeat => {
+                    let input = Self::repeat(abs(input));
+                    if sign > 0.0 {
+                        output = input;
+                    } else {
+                        output = 1.0 - input;
+                    }
+                }
+                #[allow(clippy::manual_is_multiple_of)]
+                TextureAddressMode::MirroredRepeat => {
+                    let i = abs(input);
+                    let flip = ((i as u32) % 2) == 0;
+                    let t = Self::repeat(i);
+                    if sign > 0.0 {
+                        if flip {
+                            output = t;
+                        } else {
+                            output = 1.0 - t;
+                        }
+                    } else if flip {
+                        output = 1.0 - t;
+                    } else {
+                        output = t;
+                    }
+                }
+                _ => {}
+            }
+            output
+        }
+    }
+
+    /// Method of addressing the edges of a texture.
+    #[derive(
+        Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, SlabItem, core::fmt::Debug,
+    )]
+    pub struct TextureModes {
+        pub s: TextureAddressMode,
+        pub t: TextureAddressMode,
+    }
+
+    /// A texture inside the atlas.
+    #[derive(Clone, Copy, Default, PartialEq, SlabItem, core::fmt::Debug)]
+    pub struct AtlasTextureDescriptor {
+        /// The top left offset of texture in the atlas.
+        pub offset_px: Vec2u,
+        /// The size of the texture in the atlas.
+        pub size_px: Vec2u,
+        /// The index of the layer within the atlas that this `AtlasTexture `belongs
+        /// to.
+        pub layer_index: u32,
+        /// The index of this frame within the layer.
+        pub frame_index: u32,
+        /// Various toggles of texture modes.
+        pub modes: TextureModes,
+    }
+
+    impl AtlasTextureDescriptor {
+        /// Transform the given `uv` coordinates for this texture's address mode
+        /// and placement in the atlas of the given size.
+        pub fn uv(desc: Self, uv: Vec2f, atlas_size: Vec2u) -> Vec3f {
+            let mut uv = uv;
+            uv.x = TextureAddressMode::wrap(desc.modes.s, uv.x);
+            uv.y = TextureAddressMode::wrap(desc.modes.t, uv.y);
+
+            // get the pixel index of the uv coordinate in terms of the original
+            // image
+            let mut px_index_s = (uv.x * desc.size_px.x as f32) as u32;
+            let mut px_index_t = (uv.y * desc.size_px.y as f32) as u32;
+
+            // convert the pixel index from image to atlas space
+            px_index_s += desc.offset_px.x;
+            px_index_t += desc.offset_px.y;
+
+            let sx = atlas_size.x as f32;
+            let sy = atlas_size.y as f32;
+            // normalize the pixels by dividing by the atlas size
+            let uv_s = px_index_s as f32 / sx;
+            let uv_t = px_index_t as f32 / sy;
+
+            vec3f(uv_s, uv_t, desc.layer_index as f32)
+        }
+
+        /// Constrain the input `clip_pos` to be within the bounds of this texture
+        /// within its atlas, in texture space.
+        pub fn constrain_clip_coords_to_texture_space(
+            desc: AtlasTextureDescriptor,
+            clip_pos: Vec2f,
+            atlas_size: Vec2u,
+        ) -> Vec2f {
+            // Convert `clip_pos` into uv coords to figure out where in the texture
+            // this point lives
+            let input_uv = (clip_pos * vec2f(1.0, -1.0) + vec2f_splat(1.0)) * vec2f_splat(0.5);
+            Self::uv(desc, input_uv, atlas_size).xy()
+        }
+
+        /// Constrain the input `clip_pos` to be within the bounds of this texture
+        /// within its atlas.
+        pub fn constrain_clip_coords(
+            desc: AtlasTextureDescriptor,
+            clip_pos: Vec2f,
+            atlas_size: Vec2u,
+        ) -> Vec2f {
+            let uv = AtlasTextureDescriptor::constrain_clip_coords_to_texture_space(
+                desc, clip_pos, atlas_size,
+            );
+            // Convert `uv` back into clip space
+            (uv * vec2f(2.0, 2.0) - vec2f_splat(1.0)) * vec2f(1.0, -1.0)
+        }
+    }
+
+    #[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
+    pub struct AtlasBlittingDescriptor {
+        pub atlas_texture_id: Id<AtlasTextureDescriptor>,
+        pub atlas_desc_id: Id<AtlasDescriptor>,
+    }
+
+    storage!(group(0), binding(0), SLAB: RuntimeArray<u32>);
+
+    pub struct AtlasBlitVertexInput {
+        #[builtin(vertex_index)]
+        pub vertex_id: u32,
+        #[builtin(instance_index)]
+        pub atlas_blitting_desc_id: u32,
+    }
+
+    pub struct AtlasBlitInterStage {
+        #[location(0)]
+        uv: Vec2f,
+        #[builtin(position)]
+        #[allow(dead_code)]
+        pos: Vec4f,
+    }
+
+    /// Vertex shader for blitting a texture into a the frame of an
+    /// [`AtlasTextureDescriptor`].
+    ///
+    /// This is useful for copying textures of unsupported formats, or
+    /// textures of different sizes.
+    #[vertex]
+    pub fn atlas_blit_vertex(input: AtlasBlitVertexInput) -> AtlasBlitInterStage {
+        let i = input.vertex_id as usize;
+        let uv = UV_COORD_QUAD_CCW[i];
+
+        let atlas_blitting_desc: AtlasBlittingDescriptor;
+        slab_read!(
+            AtlasBlittingDescriptor,
+            get!(SLAB),
+            input.atlas_blitting_desc_id,
+            atlas_blitting_desc
+        );
+
+        let atlas_texture: AtlasTextureDescriptor;
+        slab_read!(
+            AtlasTextureDescriptor,
+            get!(SLAB),
+            atlas_blitting_desc.atlas_texture_id.index,
+            atlas_texture
+        );
+
+        let atlas_desc: AtlasDescriptor;
+        slab_read!(
+            AtlasDescriptor,
+            get!(SLAB),
+            atlas_blitting_desc.atlas_desc_id.index,
+            atlas_desc
+        );
+
+        let clip_pos = CLIP_SPACE_COORD_QUAD_CCW[i];
+        let constrained = AtlasTextureDescriptor::constrain_clip_coords(
+            atlas_texture,
+            clip_pos.xy(),
+            atlas_desc.size.xy(),
+        );
+        let pos = vec4f(constrained.x, constrained.y, clip_pos.z, clip_pos.w);
+        AtlasBlitInterStage { uv, pos }
+    }
+
+    texture!(group(0), binding(1), TEXTURE: Texture2D<f32>);
+    sampler!(group(0), binding(2), SAMPLER: Sampler);
+
+    /// Fragment shader for blitting a texture into a frame of an atlas.
+    #[fragment]
+    pub fn atlas_blit_fragment(input: AtlasBlitInterStage) -> Vec4f {
+        texture_sample(TEXTURE, SAMPLER, input.uv)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crabslab::SlabItem as LegacySlabItem;
