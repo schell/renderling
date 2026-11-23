@@ -19,7 +19,6 @@ pub mod cubemap_sampling_test_fragment;
 pub mod cubemap_sampling_test_vertex;
 pub mod debug_overlay_fragment;
 pub mod debug_overlay_vertex;
-pub mod di_convolution_fragment;
 pub mod light_tiling_bin_lights;
 pub mod light_tiling_clear_tiles;
 pub mod light_tiling_compute_tile_min_and_max_depth;

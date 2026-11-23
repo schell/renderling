@@ -81,15 +81,6 @@ pub mod math {
         input <= F32_EPSILON
     }
 
-    /// Return `0.0` if the length of the vector is very close to zero.
-    pub fn vec3_norm_or_zero(v: Vec3f) -> Vec3f {
-        if length(v) <= F32_EPSILON {
-            Vec3f::ZERO
-        } else {
-            normalize(v)
-        }
-    }
-
     pub fn triangle_face_normal(p1: Vec3f, p2: Vec3f, p3: Vec3f) -> Vec3f {
         let a = p1 - p2;
         let b = p1 - p3;

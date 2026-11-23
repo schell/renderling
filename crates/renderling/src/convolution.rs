@@ -289,59 +289,6 @@ pub mod brdf {
     }
 }
 
-#[wgsl_rs::wgsl]
-pub mod di {
-    //! IBL diffuse irradiance convolution shader.
-    use wgsl_rs::glm::*;
-
-    use crate::shader::constants::{FRAC_PI_2, PI};
-
-    pub use super::prefilter_environment_cubemap::{ENVIRONMENT_CUBEMAP, SAMPLER};
-
-    /// Diffuse irradiance inter stage shape.
-    // NOTE: Temporary until https://github.com/schell/wgsl-rs/issues/259
-    pub struct DiInterStage {
-        #[location(0)]
-        local_pos: Vec3f,
-    }
-
-    /// Diffuse irradiance convolution.
-    #[fragment]
-    pub fn di_convolution_fragment(input: DiInterStage) -> Vec4f {
-        let mut normal = normalize_or_zero3(input.local_pos);
-        normal.y *= -1.0;
-        let mut irradiance = Vec3f::ZERO;
-        let right = normalize_or_zero3(cross(Vec3f::Y, normal));
-        let up = normalize_or_zero3(cross(normal, right));
-
-        let sample_delta = 0.025;
-        let mut nr_samples = 0.0;
-        let mut phi = 0.0f32;
-        while phi < 2.0 * PI {
-            let mut theta = 0.0f32;
-            while theta < FRAC_PI_2 {
-                // spherical to cartisian tangent coords
-                let tangent_sample =
-                    vec3f(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
-                // tangent to world coords
-                let sample_vec = normalize_or_zero3(
-                    tangent_sample.x * right + tangent_sample.y * up + tangent_sample.z * normal,
-                );
-                let sample = texture_sample(ENVIRONMENT_CUBEMAP, SAMPLER, sample_vec)
-                    * cos(theta)
-                    * sin(theta);
-                irradiance += sample.xyz();
-                nr_samples += 1.0;
-
-                theta += sample_delta;
-            }
-            phi += sample_delta;
-        }
-
-        vec4f_from_3(irradiance * (PI / nr_samples), 1.0)
-    }
-}
-
 pub mod shader {
     //! Shader side of convolution.
     use crabslab::{Id, Slab, SlabItem};

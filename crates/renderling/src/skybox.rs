@@ -21,7 +21,6 @@ pub mod common {
     #[rustfmt::skip]
     use crate::shader::math::*;
 
-
     /// Takes a unit direction and converts it to a uv lookup in an
     /// equirectangular map.
     // TODO: determine if we need this function or if we can inline.
@@ -65,16 +64,15 @@ pub mod render {
     //! Skybox shader that renders a skybox behind all objects on the stage.
 
     use crabslab_wgsl::*;
-    use wgsl_rs::std::*;
+    use wgsl_rs::glm::*;
 
-    #[rustfmt::skip]
-    use crate::shader::camera::*;
+    use crate::shader::{
+        camera::CameraDescriptor,
+        constants::{FRAC_PI_2, PI},
+        math::cube,
+    };
 
-    #[rustfmt::skip]
-    use crate::shader::math::*;
-
-
-    use super::common::*;
+    use super::common::{SkyboxInterStage, SkyboxVertexInput};
 
     storage!(group(0), binding(0), SLAB: RuntimeArray<u32>);
     texture!(group(0), binding(1), TEXTURE: TextureCube<f32>);
@@ -107,8 +105,42 @@ pub mod render {
     #[fragment]
     pub fn fragment(input: SkyboxInterStage) -> Vec4f {
         let env_color: Vec3f =
-            texture_sample(TEXTURE, SAMPLER, vec3_norm_or_zero(input.local_pos)).xyz();
+            texture_sample(TEXTURE, SAMPLER, normalize_or_zero3(input.local_pos)).xyz();
         vec4f_from_3(env_color, 1.0)
+    }
+
+    /// Diffuse irradiance convolution.
+    #[fragment]
+    pub fn di_convolution_fragment(input: SkyboxInterStage) -> Vec4f {
+        let mut normal = normalize_or_zero3(input.local_pos);
+        normal.y *= -1.0;
+        let mut irradiance = Vec3f::ZERO;
+        let right = normalize_or_zero3(cross(Vec3f::Y, normal));
+        let up = normalize_or_zero3(cross(normal, right));
+
+        let sample_delta = 0.025;
+        let mut nr_samples = 0.0;
+        let mut phi = 0.0f32;
+        while phi < 2.0 * PI {
+            let mut theta = 0.0f32;
+            while theta < FRAC_PI_2 {
+                // spherical to cartisian tangent coords
+                let tangent_sample =
+                    vec3f(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
+                // tangent to world coords
+                let sample_vec = normalize_or_zero3(
+                    tangent_sample.x * right + tangent_sample.y * up + tangent_sample.z * normal,
+                );
+                let sample = texture_sample(TEXTURE, SAMPLER, sample_vec) * cos(theta) * sin(theta);
+                irradiance += sample.xyz();
+                nr_samples += 1.0;
+
+                theta += sample_delta;
+            }
+            phi += sample_delta;
+        }
+
+        vec4f_from_3(irradiance * (PI / nr_samples), 1.0)
     }
 }
 
@@ -117,16 +149,11 @@ pub mod equirect_to_cubemap {
     //! TODO: better module docs
 
     use crabslab_wgsl::*;
-    use wgsl_rs::std::*;
+    use wgsl_rs::glm::*;
 
-    #[rustfmt::skip]
-    use crate::shader::camera::*;
+    use crate::shader::camera::CameraDescriptor;
 
-    #[rustfmt::skip]
-    use crate::shader::math::*;
-
-
-    use super::common::*;
+    use super::common::{direction_to_equirectangular_uv, SkyboxInterStage, SkyboxVertexInput};
 
     storage!(group(0), binding(0), SLAB: RuntimeArray<u32>);
     // The equirectangular source is Rgba32Float: structurally unfilterable in
@@ -150,7 +177,7 @@ pub mod equirect_to_cubemap {
     /// Fragment shader that colors a skybox using an equirectangular texture.
     #[fragment]
     pub fn fragment(input: SkyboxInterStage) -> Vec4f {
-        let uv = direction_to_equirectangular_uv(vec3_norm_or_zero(input.local_pos));
+        let uv = direction_to_equirectangular_uv(normalize_or_zero3(input.local_pos));
         // The equirectangular source is Rgba32Float: unfilterable in WebGPU,
         // so sampling must use an explicit level (the source has one mip).
         let env_color = texture_sample_level(TEXTURE, SAMPLER, uv, 0.0).rgb();
