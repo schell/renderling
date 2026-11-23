@@ -1,5 +1,6 @@
 //! CPU side of BRDF stuff.
 use craballoc::runtime::WgpuRuntime;
+use wgsl_rs_linkage_wgpu::IrModuleExt;
 
 use crate::texture;
 
@@ -15,18 +16,29 @@ impl BrdfLut {
         let runtime = runtime.as_ref();
         let device = &runtime.device;
         let queue = &runtime.queue;
-        let vertex_linkage = crate::linkage::brdf_lut_convolution_vertex::linkage(device);
-        let fragment_linkage = crate::linkage::brdf_lut_convolution_fragment::linkage(device);
+        let linkage = crate::convolution::brdf::instantiate().generate_linkage();
+        let module = linkage.shader_module(device);
+        let vertex = linkage
+            .vertex_entry("brdf_lut_convolution_vertex")
+            .expect("brdf vertex")
+            .vertex_state(&module);
+        let targets = [Some(wgpu::ColorTargetState {
+            format: wgpu::TextureFormat::Rg16Float,
+            blend: Some(wgpu::BlendState {
+                color: wgpu::BlendComponent::REPLACE,
+                alpha: wgpu::BlendComponent::REPLACE,
+            }),
+            write_mask: wgpu::ColorWrites::ALL,
+        })];
+        let fragment = linkage
+            .fragment_entry("brdf_lut_convolution_fragment")
+            .expect("brdf fragment")
+            .fragment_state(&module, &targets);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             multiview_mask: None,
             label: Some("brdf_lut_convolution"),
             layout: None,
-            vertex: wgpu::VertexState {
-                module: &vertex_linkage.module,
-                entry_point: Some(vertex_linkage.entry_point),
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
+            vertex,
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
@@ -42,19 +54,7 @@ impl BrdfLut {
                 alpha_to_coverage_enabled: false,
                 count: 1,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &fragment_linkage.module,
-                entry_point: Some(fragment_linkage.entry_point),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rg16Float,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent::REPLACE,
-                        alpha: wgpu::BlendComponent::REPLACE,
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
+            fragment: Some(fragment),
             cache: None,
         });
 
