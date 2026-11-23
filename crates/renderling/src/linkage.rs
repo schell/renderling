@@ -24,8 +24,6 @@ pub mod light_tiling_clear_tiles;
 pub mod light_tiling_compute_tile_min_and_max_depth;
 pub mod light_tiling_compute_tile_min_and_max_depth_multisampled;
 pub mod light_tiling_depth_pre_pass;
-pub mod prefilter_environment_cubemap_fragment;
-pub mod prefilter_environment_cubemap_vertex;
 pub mod primitive_fragment;
 pub mod primitive_vertex;
 pub mod shadow_mapping_fragment;
