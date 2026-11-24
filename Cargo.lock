@@ -897,7 +897,7 @@ dependencies = [
 [[package]]
 name = "craballoc"
 version = "0.5.0"
-source = "git+https://github.com/schell/crabslab?branch=feat-wgsl-rs-std-slabitem#ae33278bd4109542560f8a90f3aeda51d7989fea"
+source = "git+https://github.com/schell/crabslab?branch=feat-wgsl-rs-std-slabitem#639c0f26919e4fd38c26870f4d1d45e703fad46a"
 dependencies = [
  "async-channel 1.9.0",
  "bytemuck",
@@ -924,7 +924,7 @@ dependencies = [
 [[package]]
 name = "crabslab"
 version = "0.7.1"
-source = "git+https://github.com/schell/crabslab?branch=feat-wgsl-rs-std-slabitem#ae33278bd4109542560f8a90f3aeda51d7989fea"
+source = "git+https://github.com/schell/crabslab?branch=feat-wgsl-rs-std-slabitem#639c0f26919e4fd38c26870f4d1d45e703fad46a"
 dependencies = [
  "crabslab-derive 0.7.0",
  "futures-lite 1.13.0",
@@ -945,7 +945,7 @@ dependencies = [
 [[package]]
 name = "crabslab-derive"
 version = "0.7.0"
-source = "git+https://github.com/schell/crabslab?branch=feat-wgsl-rs-std-slabitem#ae33278bd4109542560f8a90f3aeda51d7989fea"
+source = "git+https://github.com/schell/crabslab?branch=feat-wgsl-rs-std-slabitem#639c0f26919e4fd38c26870f4d1d45e703fad46a"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1211,7 +1211,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2254,7 +2254,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi 0.5.3",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4219,7 +4219,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4562,7 +4562,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -4742,7 +4742,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5670,7 +5670,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
