@@ -13,6 +13,7 @@ name = "example"
 [dependencies]
 clap = { version = "^4.3", features = ["derive"] }
 craballoc.workspace = true
+craballoc_wgsl.workspace = true
 #console-subscriber = "0.4.0"
 env_logger = {workspace=true}
 futures-lite = {workspace=true}

@@ -10,84 +10,11 @@ on:
 env:
   # For setup-rust, see https://github.com/moonrepo/setup-rust/issues/22
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  CARGO_GPU_COMMITSH: 31153a8edd3bc626d4b9fb0cd7bdb7a8b30797d3
   # Nightly toolchain used for rustfmt in CI and in renderling-build's codegen.
-  # Bump deliberately: reformat + regenerate shaders in the same PR.
+  # Bump deliberately: reformat + regenerate linkage in the same PR.
   RUST_NIGHTLY_TOOLCHAIN: nightly-2026-10-10
 
 jobs:
-  # Installs cargo deps and sets the cache directory for subsequent jobs
-  install-cargo-gpu:
-    strategy:
-      matrix: 
-        os: [ubuntu-24.04, macos-latest]
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run: 
-        shell: bash
-    env:
-      RUST_LOG: debug  
-      RUNNER_OS: ${{ matrix.os }}
-    outputs:
-      cachepath-macOS: ${{ steps.cachepathstep.outputs.cachepath-macOS }}
-      cachepath-Linux: ${{ steps.cachepathstep.outputs.cachepath-Linux }}
-      cachepath-Windows: ${{ steps.cachepathstep.outputs.cachepath-Windows }}
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cargo
-          # THIS KEY MUST MATCH BELOW
-          key: cargo-cache-2-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
-      - uses: moonrepo/setup-rust@v1
-        with:
-          cache: false
-      - run: rustup default stable 
-      - run: rustup update
-      - run: | 
-          cargo install --git https://github.com/rust-gpu/cargo-gpu --rev $CARGO_GPU_COMMITSH cargo-gpu 
-      - run: cargo gpu show commitsh
-      - id: cachepathstep
-        run: |
-          CACHE_PATH=`cargo gpu show cache-directory`
-          echo $CACHE_PATH
-          echo "cachepath-$RUNNER_OS=$CACHE_PATH" >> "$GITHUB_OUTPUT"
-
-  # Ensures the generated linkage code matches what is committed.
-  #
-  # NOTE: `cargo shaders` (rust-gpu SPIR-V compilation) is temporarily skipped.
-  # The pinned rust-gpu rev (05b34493, toolchain nightly-2025-02-16, rustc
-  # 1.86) predates naga 30's MSRV of 1.87, which fails the shader build's
-  # dependency resolution. The committed .spv files are rust-gpu output and do
-  # not change with the wgpu version, so they are kept as-is. To re-enable,
-  # bump the rust-gpu rev (v0.11 uses nightly-2026-08-15) and restore the
-  # `cargo shaders` step, the `crates/renderling/shaders` deletion and the
-  # `needs: install-cargo-gpu` + cargo-gpu cache steps.
-  renderling-build-shaders:
-    strategy:
-      fail-fast: false
-      matrix: 
-        # temporarily skip windows, revisit after a fix for this error is found:
-        # https://github.com/rust-lang/cc-rs/issues/1331
-        os: [ubuntu-24.04, macos-latest] #, windows-latest]
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run: 
-        shell: bash
-    env:
-      RUST_LOG: debug
-    steps:
-      - uses: actions/checkout@v2
-      - uses: moonrepo/setup-rust@v1
-        with:
-          cache: false
-      - run: rustup install $RUST_NIGHTLY_TOOLCHAIN
-      - run: rustup component add --toolchain $RUST_NIGHTLY_TOOLCHAIN rustfmt
-      - run: rm -rf crates/renderling/src/linkage/*
-      - run: cargo linkage
-      - run: cargo build -p renderling
-      - run: git diff --exit-code --no-ext-diff
-
   # Ensures code is properly formatted with nightly rustfmt
   renderling-fmt:
     runs-on: ubuntu-latest
@@ -97,7 +24,7 @@ jobs:
         with:
           path: ~/.cargo
           # THIS KEY MUST MATCH ABOVE
-          key: renderling-fmt-${{ env.CARGO_GPU_COMMITSH }}-ubuntu-24.04
+          key: renderling-fmt-ubuntu-24.04
       - run: mkdir -p $HOME/.cargo/bin
       - uses: moonrepo/setup-rust@v1
       - run: rustup install $RUST_NIGHTLY_TOOLCHAIN

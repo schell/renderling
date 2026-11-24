@@ -300,23 +300,19 @@ pub fn convert_pixels(
             bytes.into_iter().flat_map(|r| [r, 0, 0, 255]).collect()
         }
         (AtlasImageFormat::R8G8, wgpu::TextureFormat::Rgba8Unorm) => bytes
-            .chunks_exact(2)
-            .flat_map(|p| {
-                if let [r, g] = p {
-                    [*r, *g, 0, 255]
-                } else {
-                    unreachable!()
-                }
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .flat_map(|p| match p {
+                [r, g] => [*r, *g, 0, 255],
             })
             .collect(),
         (AtlasImageFormat::R8G8B8, wgpu::TextureFormat::Rgba8Unorm) => bytes
-            .chunks_exact(3)
-            .flat_map(|p| {
-                if let [r, g, b] = p {
-                    [*r, *g, *b, 255]
-                } else {
-                    unreachable!()
-                }
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|p| match p {
+                [r, g, b] => [*r, *g, *b, 255],
             })
             .collect(),
         (AtlasImageFormat::R8G8B8A8, wgpu::TextureFormat::Rgba8Unorm) => bytes,
@@ -328,25 +324,21 @@ pub fn convert_pixels(
         }
         (AtlasImageFormat::R16G16, wgpu::TextureFormat::Rgba8Unorm) => {
             bytemuck::cast_slice::<u8, u16>(&bytes)
-                .chunks_exact(2)
-                .flat_map(|p| {
-                    if let [r, g] = p {
-                        [u16_to_u8(*r), u16_to_u8(*g), 0, 255]
-                    } else {
-                        unreachable!()
-                    }
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .flat_map(|p| match p {
+                    [r, g] => [u16_to_u8(*r), u16_to_u8(*g), 0, 255],
                 })
                 .collect()
         }
         (AtlasImageFormat::R16G16B16, wgpu::TextureFormat::Rgba8Unorm) => {
             bytemuck::cast_slice::<u8, u16>(&bytes)
-                .chunks_exact(3)
-                .flat_map(|p| {
-                    if let [r, g, b] = p {
-                        [u16_to_u8(*r), u16_to_u8(*g), u16_to_u8(*b), 255]
-                    } else {
-                        unreachable!()
-                    }
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .flat_map(|p| match p {
+                    [r, g, b] => [u16_to_u8(*r), u16_to_u8(*g), u16_to_u8(*b), 255],
                 })
                 .collect()
         }
@@ -363,25 +355,21 @@ pub fn convert_pixels(
                 .iter()
                 .map(|bits| half::f16::from_bits(*bits).to_f32())
                 .collect::<Vec<_>>()
-                .chunks_exact(4)
-                .flat_map(|p| {
-                    if let [r, g, b, a] = p {
-                        [f32_to_u8(*r), f32_to_u8(*g), f32_to_u8(*b), f32_to_u8(*a)]
-                    } else {
-                        unreachable!()
-                    }
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .flat_map(|p| match p {
+                    [r, g, b, a] => [f32_to_u8(*r), f32_to_u8(*g), f32_to_u8(*b), f32_to_u8(*a)],
                 })
                 .collect()
         }
         (AtlasImageFormat::R32G32B32FLOAT, wgpu::TextureFormat::Rgba8Unorm) => {
             bytemuck::cast_slice::<u8, f32>(&bytes)
-                .chunks_exact(3)
-                .flat_map(|p| {
-                    if let [r, g, b] = p {
-                        [f32_to_u8(*r), f32_to_u8(*g), f32_to_u8(*b), 255]
-                    } else {
-                        unreachable!()
-                    }
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .flat_map(|p| match p {
+                    [r, g, b] => [f32_to_u8(*r), f32_to_u8(*g), f32_to_u8(*b), 255],
                 })
                 .collect()
         }

@@ -12,7 +12,6 @@
 - Imports: group by crate (`imports_granularity = "crate"`), std → external → internal
 - Error handling: use `snafu` crate with `#[derive(Debug, Snafu)]`
 - Naming: `snake_case` functions/modules, `PascalCase` types, `with_*` builder methods
-- Tests: inline `#[cfg(test)] mod test { ... }` within modules
 - CPU-only code: wrap with `#[cfg(cpu)]`
 
 Always format with `cargo +nightly fmt`.
@@ -25,3 +24,9 @@ Avoid: `Vec{2,3,4}::normalize_or_zero`, `Mat4::to_scale_rotation_translation`, `
 ## Beads
 
 The bead prefix for this project is `rling`.
+
+## Testing
+
+This repo does a lot of generating images and comparing them to saved "golden" images.
+To do this, use the `img_diff::assert_*` functions. They'll generate convenient diffs
+in failure cases, which you can then inspect from the `test_output` directory.

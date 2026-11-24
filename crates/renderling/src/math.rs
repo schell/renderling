@@ -635,7 +635,9 @@ pub const UNIT_INDICES: [usize; 36] = [
 #[cfg(not(target_arch = "spirv"))]
 pub fn unit_cube() -> Vec<(Vec3, Vec3)> {
     UNIT_INDICES
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .flat_map(|chunk| match chunk {
             [a, b, c] => {
                 let a = UNIT_POINTS[*a];
@@ -644,7 +646,6 @@ pub fn unit_cube() -> Vec<(Vec3, Vec3)> {
                 let n = triangle_face_normal(a, b, c);
                 [(a, n), (b, n), (c, n)]
             }
-            _ => unreachable!(),
         })
         .collect::<Vec<_>>()
 }

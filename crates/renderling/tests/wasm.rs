@@ -183,7 +183,7 @@ async fn can_clear_background_sanity() {
 #[wasm_bindgen_test]
 async fn implicit_isosceles_triangle() {
     let ctx = Context::headless(100, 100).await;
-    let runtime = ctx.as_ref();
+    let runtime: &WgpuRuntime = ctx.as_ref();
 
     fn create_pipeline(
         runtime: &WgpuRuntime,
@@ -455,7 +455,7 @@ async fn slabbed_vertices_no_instance() {
 #[wasm_bindgen_test]
 async fn slabbed_isosceles_triangle() {
     let ctx = Context::headless(100, 100).await;
-    let runtime = ctx.as_ref();
+    let runtime: &WgpuRuntime = ctx.as_ref();
 
     // Create our geometry on the slab.
     let slab = SlabAllocator::new(

@@ -1,4 +1,9 @@
 //! CPU-side compositor for alpha-blending a source texture onto a target.
+use std::sync::{Arc, RwLock};
+
+use wgsl_rs_linkage_wgpu::{analyze_wgsl_module, WgpuLinkage};
+
+use super::shader::WGSL_SOURCE;
 
 /// Alpha-blends a source texture onto a target framebuffer using a
 /// fullscreen quad.
@@ -14,64 +19,25 @@
 /// ```
 pub struct Compositor {
     pipeline: wgpu::RenderPipeline,
-    bindgroup_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    linkage: Arc<RwLock<WgpuLinkage>>,
 }
 
 impl Compositor {
     /// Create a new compositor targeting the given texture format.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("compositor"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-
-        let bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("compositor"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("compositor"),
-            bind_group_layouts: &[Some(&bindgroup_layout)],
-            immediate_size: 0,
-        });
-
-        let vertex = crate::linkage::compositor_vertex::linkage(device);
-        let fragment = crate::linkage::compositor_fragment::linkage(device);
+        let mut linkage = analyze_wgsl_module(&WGSL_SOURCE).expect("compositor wgsl analysis");
+        let wgsl_module = linkage.shader_module(device);
+        let pipeline_layout = linkage.pipeline_layout(device, Some("compositor"));
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             multiview_mask: None,
             label: Some("compositor"),
             layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &vertex.module,
-                entry_point: Some(vertex.entry_point),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
+            vertex: linkage
+                .vertex_entry("compositor_vertex")
+                .expect("compositor_vertex entry present")
+                .vertex_state(&wgsl_module),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
@@ -84,8 +50,8 @@ impl Compositor {
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
-                module: &fragment.module,
-                entry_point: Some(fragment.entry_point),
+                module: &wgsl_module,
+                entry_point: Some("compositor_fragment"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
@@ -96,10 +62,20 @@ impl Compositor {
             cache: None,
         });
 
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("compositor"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
         Self {
             pipeline,
-            bindgroup_layout,
             sampler,
+            linkage: Arc::new(RwLock::new(linkage)),
         }
     }
 
@@ -115,20 +91,19 @@ impl Compositor {
         source: &wgpu::TextureView,
         target: &wgpu::TextureView,
     ) {
-        let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("compositor"),
-            layout: &self.bindgroup_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(source),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-            ],
-        });
+        let bindgroup = {
+            let mut linkage = self.linkage.write().expect("compositor linkage write");
+            linkage
+                .create_bind_group_named(
+                    0,
+                    device,
+                    &[
+                        ("TEXTURE", wgpu::BindingResource::TextureView(source)),
+                        ("SAMPLER", wgpu::BindingResource::Sampler(&self.sampler)),
+                    ],
+                )
+                .expect("compositor bind group")
+        };
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("compositor"),

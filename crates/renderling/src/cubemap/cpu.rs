@@ -145,128 +145,12 @@ impl SceneCubemap {
     }
 }
 
-/// A render pipeline for blitting an equirectangular image as a cubemap.
-pub struct EquirectangularImageToCubemapBlitter(pub wgpu::RenderPipeline);
-
-impl EquirectangularImageToCubemapBlitter {
-    pub fn create_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("cubemap-making bindgroup"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-            ],
-        })
-    }
-
-    pub fn create_bindgroup(
-        device: &wgpu::Device,
-        label: Option<&str>,
-        buffer: &wgpu::Buffer,
-        // The texture to sample the environment from
-        texture: &Texture,
-    ) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label,
-            layout: &Self::create_bindgroup_layout(device),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
-                },
-            ],
-        })
-    }
-
-    /// Create the rendering pipeline that creates cubemaps from equirectangular
-    /// images.
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        log::trace!("creating cubemap-making render pipeline with format '{format:?}'");
-        let vertex_linkage = crate::linkage::skybox_cubemap_vertex::linkage(device);
-        let fragment_linkage = crate::linkage::skybox_equirectangular_fragment::linkage(device);
-        let bg_layout = Self::create_bindgroup_layout(device);
-        let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("cubemap-making pipeline layout"),
-            bind_group_layouts: &[Some(&bg_layout)],
-            immediate_size: 0,
-        });
-        EquirectangularImageToCubemapBlitter(device.create_render_pipeline(
-            &wgpu::RenderPipelineDescriptor {
-                multiview_mask: None,
-                label: Some("cubemap-making pipeline"),
-                layout: Some(&pp_layout),
-                vertex: wgpu::VertexState {
-                    module: &vertex_linkage.module,
-                    entry_point: Some(vertex_linkage.entry_point),
-                    buffers: &[],
-                    compilation_options: Default::default(),
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                    count: 1,
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &fragment_linkage.module,
-                    entry_point: Some(fragment_linkage.entry_point),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                cache: None,
-            },
-        ))
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use craballoc::slab::SlabAllocator;
+    use craballoc::{
+        runtime::WgpuRuntime,
+        slab::{SlabAllocator, SlabBuffer},
+    };
     use glam::Vec4;
     use image::GenericImageView;
 
@@ -323,9 +207,14 @@ mod test {
         );
         scene_cubemap.run(&stage);
 
-        let slab = SlabAllocator::new(&ctx, "cubemap-sampling-test", wgpu::BufferUsages::empty());
+        let runtime: &WgpuRuntime = ctx.as_ref();
+        let slab = SlabAllocator::new(
+            runtime,
+            "cubemap-sampling-test",
+            wgpu::BufferUsages::empty(),
+        );
         let uv = slab.new_value(Vec3::ZERO);
-        let buffer = slab.commit();
+        let buffer: SlabBuffer<wgpu::Buffer> = slab.commit();
         let label = Some("cubemap-sampling-test");
         let bind_group_layout =
             ctx.get_device()

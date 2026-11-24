@@ -55,8 +55,10 @@ fn uv_unit_cube() -> Vec<Vertex> {
 
 /// Returns the number of pixels that differ between two raw RGBA images.
 fn pixel_diff(a: &[u8], b: &[u8]) -> usize {
-    a.chunks_exact(4)
-        .zip(b.chunks_exact(4))
+    a.as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.as_chunks::<4>().0.iter())
         .filter(|(a, b)| a != b)
         .count()
 }
@@ -257,7 +259,9 @@ async fn manual_materials() {
     // The textured render should contain far more distinct colors than a
     // flat, untextured render.
     let unique_colors = |raw: &[u8]| {
-        raw.chunks_exact(4)
+        raw.as_chunks::<4>()
+            .0
+            .iter()
             .map(|p| [p[0], p[1], p[2], p[3]])
             .collect::<std::collections::HashSet<[u8; 4]>>()
             .len()

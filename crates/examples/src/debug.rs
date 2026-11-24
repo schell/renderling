@@ -136,8 +136,10 @@ async fn manual_debug() {
 
     // Each step should have changed the rendering.
     let pixel_diff = |a: &[u8], b: &[u8]| {
-        a.chunks_exact(4)
-            .zip(b.chunks_exact(4))
+        a.as_chunks::<4>()
+            .0
+            .iter()
+            .zip(b.as_chunks::<4>().0.iter())
             .filter(|(a, b)| a != b)
             .count()
     };

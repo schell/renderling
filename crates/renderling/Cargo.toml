@@ -55,7 +55,10 @@ glam = { workspace = true, default-features = false, features = ["libm"] }
 async-channel = {workspace = true}
 bytemuck = {workspace = true}
 craballoc.workspace = true
+craballoc_wgsl.workspace = true
 crabslab = { workspace = true, features = ["default"] }
+crabslab_wgsl.workspace = true
+crabslab-derive = "=0.4.6"
 crunch = "0.5"
 dagga = {workspace=true}
 futures-lite = { workspace = true, optional = true }
@@ -70,6 +73,8 @@ rustc-hash = {workspace = true}
 serde_json = {workspace = true, optional = true}
 snafu = {workspace = true}
 wgpu = { workspace = true, features = ["spirv"] }
+wgsl-rs.workspace = true
+wgsl-rs-linkage-wgpu.workspace = true
 winit = { workspace = true, optional = true }
 
 # dependencies for WASM CPU code

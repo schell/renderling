@@ -6,6 +6,7 @@ use std::sync::Arc;
 use craballoc::{runtime::WgpuRuntime, slab::SlabAllocator, value::Hybrid};
 use crabslab::Id;
 use glam::{Mat4, Vec3};
+use wgsl_rs_linkage_wgpu::{IrModuleExt, WgpuLinkage};
 
 use crate::{
     camera::Camera, convolution::shader::VertexPrefilterEnvironmentCubemapIds, skybox::Skybox,
@@ -125,24 +126,22 @@ fn create_irradiance_map(
 ) -> texture::Texture {
     let runtime = runtime.as_ref();
     let device = &runtime.device;
-    let pipeline = crate::pbr::ibl::DiffuseIrradianceConvolutionRenderPipeline::new(
+    let mut pipeline = crate::pbr::ibl::DiffuseIrradianceConvolutionRenderPipeline::new(
         device,
         wgpu::TextureFormat::Rgba16Float,
     );
 
-    let bindgroup = crate::pbr::ibl::diffuse_irradiance_convolution_bindgroup(
-        device,
-        Some("irradiance"),
-        buffer,
-        environment_texture,
-    );
+    let bindgroup =
+        pipeline.diffuse_irradiance_convolution_bindgroup(device, buffer, environment_texture);
 
     texture::Texture::render_cubemap(
         runtime,
         "diffuse-irradiance",
-        &pipeline.0,
+        &pipeline.pipeline,
         buffer_upkeep,
-        camera,
+        |mat| {
+            camera.set_view(*mat);
+        },
         &bindgroup,
         views,
         32,
@@ -158,73 +157,52 @@ pub(crate) fn create_prefiltered_environment_pipeline_and_bindgroup(
     environment_texture: &crate::texture::Texture,
 ) -> (wgpu::RenderPipeline, wgpu::BindGroup) {
     let label = Some("prefiltered environment");
-    let bindgroup_layout_desc = wgpu::BindGroupLayoutDescriptor {
-        label,
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::Cube,
-                    multisampled: false,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-        ],
-    };
-    let bg_layout = device.create_bind_group_layout(&bindgroup_layout_desc);
-    let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label,
-        layout: &bg_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(&environment_texture.view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::Sampler(&environment_texture.sampler),
-            },
-        ],
-    });
-    let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label,
-        bind_group_layouts: &[Some(&bg_layout)],
-        immediate_size: 0,
-    });
-    let vertex_linkage = crate::linkage::prefilter_environment_cubemap_vertex::linkage(device);
-    let fragment_linkage = crate::linkage::prefilter_environment_cubemap_fragment::linkage(device);
+    let mut linkage =
+        crate::convolution::prefilter_environment_cubemap::instantiate().generate_linkage();
+    let module = linkage.shader_module(device);
+    let pp_layout = linkage.pipeline_layout(device, label);
+    let bindgroup = linkage
+        .create_bind_group_named(
+            0,
+            device,
+            &[
+                (
+                    "SLAB",
+                    wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
+                ),
+                (
+                    "ENVIRONMENT_CUBEMAP",
+                    wgpu::BindingResource::TextureView(&environment_texture.view),
+                ),
+                (
+                    "SAMPLER",
+                    wgpu::BindingResource::Sampler(&environment_texture.sampler),
+                ),
+            ],
+        )
+        .expect("prefilter env cubemap bg");
+
+    let vertex = linkage
+        .vertex_entry("prefilter_environment_cubemap_vertex")
+        .expect("prefilter env cubemap vertex")
+        .vertex_state(&module);
+    let targets = [Some(wgpu::ColorTargetState {
+        format: wgpu::TextureFormat::Rgba16Float,
+        blend: Some(wgpu::BlendState {
+            color: wgpu::BlendComponent::REPLACE,
+            alpha: wgpu::BlendComponent::REPLACE,
+        }),
+        write_mask: wgpu::ColorWrites::ALL,
+    })];
+    let fragment = linkage
+        .fragment_entry("prefilter_environment_cubemap_fragment")
+        .expect("prefilter env cubemap fragment")
+        .fragment_state(&module, &targets);
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         multiview_mask: None,
         label: Some("prefiltered environment"),
         layout: Some(&pp_layout),
-        vertex: wgpu::VertexState {
-            module: &vertex_linkage.module,
-            entry_point: Some(vertex_linkage.entry_point),
-            buffers: &[],
-            compilation_options: Default::default(),
-        },
+        vertex,
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
             strip_index_format: None,
@@ -240,19 +218,7 @@ pub(crate) fn create_prefiltered_environment_pipeline_and_bindgroup(
             alpha_to_coverage_enabled: false,
             count: 1,
         },
-        fragment: Some(wgpu::FragmentState {
-            module: &fragment_linkage.module,
-            entry_point: Some(fragment_linkage.entry_point),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: wgpu::TextureFormat::Rgba16Float,
-                blend: Some(wgpu::BlendState {
-                    color: wgpu::BlendComponent::REPLACE,
-                    alpha: wgpu::BlendComponent::REPLACE,
-                }),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-            compilation_options: Default::default(),
-        }),
+        fragment: Some(fragment),
         cache: None,
     });
     (pipeline, bindgroup)
@@ -269,12 +235,11 @@ fn create_prefiltered_environment_map(
     environment_texture: &texture::Texture,
     views: [Mat4; 6],
 ) -> texture::Texture {
-    let (pipeline, bindgroup) =
-        crate::pbr::ibl::create_prefiltered_environment_pipeline_and_bindgroup(
-            &runtime.as_ref().device,
-            buffer,
-            environment_texture,
-        );
+    let (pipeline, bindgroup) = create_prefiltered_environment_pipeline_and_bindgroup(
+        &runtime.as_ref().device,
+        buffer,
+        environment_texture,
+    );
     let mut cubemap_faces = Vec::new();
 
     for (i, view) in views.iter().enumerate() {
@@ -346,122 +311,82 @@ fn create_prefiltered_environment_map(
     )
 }
 
-pub fn diffuse_irradiance_convolution_bindgroup_layout(
-    device: &wgpu::Device,
-) -> wgpu::BindGroupLayout {
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("convolution bindgroup"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::Cube,
-                    multisampled: false,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-        ],
-    })
+pub struct DiffuseIrradianceConvolutionRenderPipeline {
+    pipeline: wgpu::RenderPipeline,
+    linkage: WgpuLinkage,
 }
 
-pub fn diffuse_irradiance_convolution_bindgroup(
-    device: &wgpu::Device,
-    label: Option<&str>,
-    buffer: &wgpu::Buffer,
-    // The texture to sample the environment from
-    texture: &crate::texture::Texture,
-) -> wgpu::BindGroup {
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label,
-        layout: &diffuse_irradiance_convolution_bindgroup_layout(device),
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(&texture.view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::Sampler(&texture.sampler),
-            },
-        ],
-    })
-}
-
-pub struct DiffuseIrradianceConvolutionRenderPipeline(pub wgpu::RenderPipeline);
+const LABEL: Option<&str> = Some("ibl convolution pipeline");
 
 impl DiffuseIrradianceConvolutionRenderPipeline {
     /// Create the rendering pipeline that performs a convolution.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        let vertex_linkage = crate::linkage::skybox_cubemap_vertex::linkage(device);
-        let fragment_linkage = crate::linkage::di_convolution_fragment::linkage(device);
-        let bg_layout = diffuse_irradiance_convolution_bindgroup_layout(device);
-        let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("convolution pipeline layout"),
-            bind_group_layouts: &[Some(&bg_layout)],
-            immediate_size: 0,
-        });
+        let mut linkage = crate::skybox::render::instantiate().generate_linkage();
+        let module = linkage.shader_module(device);
+        let pp_layout = linkage.pipeline_layout(device, LABEL);
 
-        DiffuseIrradianceConvolutionRenderPipeline(device.create_render_pipeline(
-            &wgpu::RenderPipelineDescriptor {
-                multiview_mask: None,
-                label: Some("convolution pipeline"),
-                layout: Some(&pp_layout),
-                vertex: wgpu::VertexState {
-                    module: &vertex_linkage.module,
-                    entry_point: Some(vertex_linkage.entry_point),
-                    buffers: &[],
-                    compilation_options: Default::default(),
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                    count: 1,
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &fragment_linkage.module,
-                    entry_point: Some(fragment_linkage.entry_point),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                cache: None,
+        let vertex = linkage
+            .vertex_entry("vertex")
+            .expect("skybox vertex")
+            .vertex_state(&module);
+
+        let targets = [Some(wgpu::ColorTargetState {
+            format,
+            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+            write_mask: wgpu::ColorWrites::ALL,
+        })];
+        let fragment = linkage
+            .fragment_entry("di_convolution_fragment")
+            .expect("di_convolution_fragment")
+            .fragment_state(&module, &targets);
+
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            multiview_mask: None,
+            label: LABEL,
+            layout: Some(&pp_layout),
+            vertex,
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
             },
-        ))
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+                count: 1,
+            },
+            fragment: Some(fragment),
+            cache: None,
+        });
+        DiffuseIrradianceConvolutionRenderPipeline { pipeline, linkage }
+    }
+
+    pub fn diffuse_irradiance_convolution_bindgroup(
+        &mut self,
+        device: &wgpu::Device,
+        buffer: &wgpu::Buffer,
+        // The texture to sample the environment from
+        texture: &crate::texture::Texture,
+    ) -> wgpu::BindGroup {
+        self.linkage
+            .create_bind_group_named(
+                0,
+                device,
+                &[
+                    (
+                        "SLAB",
+                        wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
+                    ),
+                    ("TEXTURE", wgpu::BindingResource::TextureView(&texture.view)),
+                    ("SAMPLER", wgpu::BindingResource::Sampler(&texture.sampler)),
+                ],
+            )
+            .expect("ibl di bg")
     }
 }
 
